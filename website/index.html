@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>W.R.O.C.K. — Worlds Reset On Command, King</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #090a0f;
+      --card-bg: rgba(18, 20, 29, 0.7);
+      --border: rgba(255, 255, 255, 0.08);
+      --accent-gold: #ffb703;
+      --accent-cyan: #00f2fe;
+      --accent-purple: #7928ca;
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Outfit', sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+      background-image: 
+        radial-gradient(circle at 15% 15%, rgba(121, 40, 202, 0.15) 0%, transparent 40%),
+        radial-gradient(circle at 85% 85%, rgba(0, 242, 254, 0.12) 0%, transparent 40%),
+        radial-gradient(circle at 50% 50%, rgba(255, 183, 3, 0.05) 0%, transparent 60%);
+    }
+
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem;
+    }
+
+    header {
+      text-align: center;
+      padding: 3rem 1rem;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(255, 183, 3, 0.1);
+      border: 1px solid rgba(255, 183, 3, 0.3);
+      color: var(--accent-gold);
+      padding: 0.4rem 1rem;
+      border-radius: 9999px;
+      font-size: 0.875rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-bottom: 1.5rem;
+      backdrop-filter: blur(8px);
+    }
+
+    h1 {
+      font-size: 3.5rem;
+      font-weight: 900;
+      letter-spacing: -0.02em;
+      background: linear-gradient(135deg, #ffffff 30%, var(--accent-gold) 70%, var(--accent-cyan) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 0.75rem;
+      line-height: 1.1;
+    }
+
+    .acronym {
+      font-size: 1.25rem;
+      color: var(--accent-cyan);
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      margin-bottom: 1rem;
+    }
+
+    p.subtitle {
+      font-size: 1.15rem;
+      color: var(--text-muted);
+      max-width: 650px;
+      margin: 0 auto 2.5rem;
+      line-height: 1.6;
+    }
+
+    .quick-command-box {
+      background: rgba(10, 12, 18, 0.9);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 1.25rem 1.5rem;
+      max-width: 750px;
+      margin: 0 auto 3rem;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+      position: relative;
+    }
+
+    .command-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.75rem;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 600;
+    }
+
+    .command-content {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #050608;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 10px;
+      padding: 0.85rem 1.2rem;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--accent-cyan);
+      font-size: 0.95rem;
+    }
+
+    .btn-copy {
+      background: linear-gradient(135deg, var(--accent-gold), #ff9100);
+      color: #000;
+      border: none;
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      font-weight: 700;
+      cursor: pointer;
+      font-size: 0.85rem;
+      transition: all 0.2s ease;
+    }
+
+    .btn-copy:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 15px rgba(255, 183, 3, 0.4);
+    }
+
+    .cta-group {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 4rem;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent-cyan), #0072ff);
+      color: #000;
+      font-weight: 800;
+      padding: 1rem 2rem;
+      border-radius: 12px;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.6rem;
+      font-size: 1.05rem;
+      transition: all 0.2s ease;
+      box-shadow: 0 8px 25px rgba(0, 242, 254, 0.3);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 12px 30px rgba(0, 242, 254, 0.5);
+    }
+
+    .customizer-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 2.5rem;
+      backdrop-filter: blur(16px);
+      margin-bottom: 4rem;
+      box-shadow: 0 30px 60px rgba(0,0,0,0.4);
+    }
+
+    .section-title {
+      font-size: 1.8rem;
+      font-weight: 800;
+      margin-bottom: 0.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .section-desc {
+      color: var(--text-muted);
+      margin-bottom: 2rem;
+      font-size: 1rem;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    label {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: #e5e7eb;
+    }
+
+    input, select {
+      background: rgba(10, 12, 18, 0.8);
+      border: 1px solid var(--border);
+      color: #fff;
+      padding: 0.8rem 1rem;
+      border-radius: 10px;
+      font-family: inherit;
+      font-size: 0.95rem;
+      transition: border-color 0.2s ease;
+    }
+
+    input:focus, select:focus {
+      outline: none;
+      border-color: var(--accent-cyan);
+      box-shadow: 0 0 0 3px rgba(0, 242, 254, 0.15);
+    }
+
+    .code-preview {
+      background: #050608;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      color: #a7f3d0;
+      white-space: pre-wrap;
+      overflow-x: auto;
+      margin-bottom: 1.5rem;
+    }
+
+    footer {
+      text-align: center;
+      padding: 3rem 1rem;
+      border-top: 1px solid var(--border);
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="badge">👏 Double-Clap Command Engine</div>
+      <h1>W.R.O.C.K.</h1>
+      <div class="acronym">Worlds Reset On Command, King</div>
+      <p class="subtitle">
+        Double clap from anywhere in your room to immediately launch your Spotify track, open YouTube & Claude AI in Chrome, play custom ElevenLabs voice announcements, and open your IDE.
+      </p>
+
+      <div class="quick-command-box">
+        <div class="command-header">
+          <span>⚡ One-Command Instant Setup (Windows PowerShell)</span>
+          <span>Copy & Run</span>
+        </div>
+        <div class="command-content">
+          <span id="cmdText">iwr -useb https://raw.githubusercontent.com/wrock/main/run.ps1 | iex</span>
+          <button class="btn-copy" onclick="copyCommand()">Copy Command</button>
+        </div>
+      </div>
+
+      <div class="cta-group">
+        <a href="../wrock.zip" download="wrock.zip" class="btn-primary">
+          <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M12 15V3m0 12l-4-4m4 4l4-4M2 17l.621 2.485A2 2 0 004.561 21h14.878a2 2 0 001.94-1.515L22 17"></path></svg>
+          Download W.R.O.C.K. ZIP Package
+        </a>
+      </div>
+    </header>
+
+    <main>
+      <section class="customizer-card">
+        <h2 class="section-title">✨ Open Anything You Want (Custom Studio)</h2>
+        <p class="section-desc">Customize what opens on double clap. Build your custom <code>.env</code> file below!</p>
+
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="youtubeUrl">YouTube / Website URL</label>
+            <input type="text" id="youtubeUrl" value="https://www.youtube.com" oninput="updatePreview()">
+          </div>
+
+          <div class="form-group">
+            <label for="spotifyUrl">Spotify / Music Track URI</label>
+            <input type="text" id="spotifyUrl" value="https://open.spotify.com/track/39shmbIHICJ2Wxnk1fPSdz" oninput="updatePreview()">
+          </div>
+
+          <div class="form-group">
+            <label for="customApp">Local App Path (.exe)</label>
+            <input type="text" id="customApp" value="C:\Program Files\Google\Chrome\Application\chrome.exe" oninput="updatePreview()">
+          </div>
+
+          <div class="form-group">
+            <label for="voicePhrase">W.R.O.C.K. Voice Announcement</label>
+            <input type="text" id="voicePhrase" value="W.R.O.C.K. online. Worlds Reset On Command, King. Welcome home." oninput="updatePreview()">
+          </div>
+        </div>
+
+        <label>Generated .env Configuration Preview:</label>
+        <div class="code-preview" id="envPreview"></div>
+
+        <button class="btn-copy" onclick="downloadEnvFile()" style="padding: 0.8rem 1.5rem; font-size: 0.95rem;">
+          📥 Download My Custom .env File
+        </button>
+      </section>
+    </main>
+
+    <footer>
+      <p>W.R.O.C.K. — Worlds Reset On Command, King &copy; 2026. Powered by Python & ElevenLabs.</p>
+    </footer>
+  </div>
+
+  <script>
+    function updatePreview() {
+      const yt = document.getElementById('youtubeUrl').value;
+      const sp = document.getElementById('spotifyUrl').value;
+      const app = document.getElementById('customApp').value;
+      const phrase = document.getElementById('voicePhrase').value;
+
+      const env = `# W.R.O.C.K. (Worlds Reset On Command, King)
+ELEVENLABS_API_KEY=your_key_here
+ELEVENLABS_VOICE_ID=VR6AewLTigWG4xSOukaG
+YOUTUBE_URL=${yt}
+SONG_URI=${sp}
+CUSTOM_APP_PATH=${app}
+WROCK_WELCOME_PHRASE="${phrase}"`;
+
+      document.getElementById('envPreview').innerText = env;
+    }
+
+    function copyCommand() {
+      const text = document.getElementById('cmdText').innerText;
+      navigator.clipboard.writeText(text);
+      alert('Command copied to clipboard! Paste it into PowerShell.');
+    }
+
+    function downloadEnvFile() {
+      const text = document.getElementById('envPreview').innerText;
+      const blob = new Blob([text], { type: 'text/plain' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = '.env';
+      a.click();
+    }
+
+    updatePreview();
+  </script>
+</body>
+</html>
