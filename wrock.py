@@ -1082,5 +1082,41 @@ def main() -> int:
     return 0
 
 
+def test_mic_live() -> None:
+    """Print live RMS audio level visualizer bar."""
+    blocksize = block_samples()
+    input_idx = _choose_input_device(blocksize)
+    print("\n--- 🎤 LIVE MIC TEST (Make sounds or clap to see volume meter) ---")
+    print("Press Ctrl+C to exit test mode.\n")
+    try:
+        with sd.InputStream(
+            device=input_idx,
+            samplerate=SAMPLE_RATE,
+            channels=CHANNELS,
+            dtype="float32",
+            blocksize=blocksize,
+        ) as stream:
+            while True:
+                data, _ = stream.read(blocksize)
+                level = rms_mono(data)
+                bars = "█" * int(level * 500)
+                spike_mark = " 💥 SPIKE!" if level >= MIN_RMS else ""
+                print(f"\rRMS: {level:.5f} |{bars:<50}|{spike_mark}", end="", flush=True)
+                time.sleep(0.02)
+    except KeyboardInterrupt:
+        print("\nMic test stopped.\n")
+
+
 if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        arg = sys.argv[1].lower()
+        if arg in ("--test-actions", "-a", "test-actions"):
+            print("🚀 Running all W.R.O.C.K. actions test...")
+            run_double_clap_actions()
+            time.sleep(3)
+            sys.exit(0)
+        elif arg in ("--test-mic", "-m", "test-mic"):
+            test_mic_live()
+            sys.exit(0)
+
     sys.exit(main())
