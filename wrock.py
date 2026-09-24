@@ -73,34 +73,33 @@ QUIET_GATE_MULT = 2.2  # update noise floor only when below floor * this
 INPUT_PROBE_S = 0.5
 INPUT_SILENT_RMS = 0.0001
 
-# Spotify: "spotify:track:TRACK_ID" or https://open.spotify.com/track/...
-# YouTube: https://www.youtube.com/watch?v=...
-SONG_URI = "https://open.spotify.com/track/39shmbIHICJ2Wxnk1fPSdz?si=2900c75c2e2d4b82"
+# Spotify / Music: Disabled by default (will not auto-play music on its own unless requested via voice command)
+SONG_URI = ""
 
 # Cursor: focus existing instance (no -n). Set OPEN_NEW_CURSOR_ON_DOUBLE_CLAP for a new window as well.
 FOCUS_EXISTING_CURSOR_ON_DOUBLE_CLAP = True
 OPEN_NEW_CURSOR_ON_DOUBLE_CLAP = False
-CURSOR_OPEN_FULLSCREEN = True
+CURSOR_OPEN_FULLSCREEN = False  # Windowed mode (no forced F11)
 
 # Google Chrome (fallback: default browser). URLs overridable in .env.
 OPEN_CLAUDE_CODE_IN_CHROME = True
 OPEN_YOUTUBE_IN_CHROME = True
-OPEN_CHROME_FULLSCREEN = True
+OPEN_CHROME_FULLSCREEN = False  # Windowed mode (no forced fullscreen)
 # False = default Chrome profile (your normal user, extensions, cookies). True = temp dirs under %TEMP% per site.
 CHROME_SEPARATE_SITE_PROFILES = False
 # Which physical screen (1 = leftmost/top-first after sorting). Windows only; ignored elsewhere.
 CLAUDE_CHROME_MONITOR = 1
 YOUTUBE_CHROME_MONITOR = 2
 
+# Voice Wake Words (Siri / Grok Mode)
+WAKE_WORDS = ["wake up wrock", "wake up, wrock", "wake up", "wrock", "hey wrock", "ok wrock"]
+
 WROCK_WELCOME_ENABLED = True
 WROCK_WELCOME_PHRASE = (
-    "W.R.O.C.K. online. Worlds Reset On Command, King. Welcome home. "
-    "Congratulations on the new client for your SaaS app—make sure to follow up. "
-    "If it helps: a short, specific note while the deal is still fresh usually "
-    "anchors trust better than a polished deck sent cold a few days later."
+    "W.R.O.C.K. online. Worlds Reset On Command, King. Listening for your command."
 )
-# Seconds after launching SONG_URI before speaking (gives Spotify/browser time to start).
-WROCK_AFTER_SONG_DELAY_S = 1.0
+# Seconds after activation before speaking
+WROCK_AFTER_SONG_DELAY_S = 0.5
 # Save ElevenLabs PCM as WAV under .cache/wrock_welcome/; replay skips the API when the key matches.
 WROCK_WELCOME_CACHE_ENABLED = True
 
@@ -283,7 +282,25 @@ def _wrock_welcome_cache_path(
     return _wrock_welcome_cache_dir() / f"{digest}.wav"
 
 
+def play_activation_chime() -> None:
+    """Siri / Grok-style dual ascending activation chime."""
+    if sys.platform == "win32":
+        try:
+            import winsound
+            winsound.Beep(880, 100)   # Tone 1
+            winsound.Beep(1320, 150)  # Tone 2
+        except Exception:
+            pass
+
+
 def _play_pcm_wav_file(path: Path) -> bool:
+    if sys.platform == "win32":
+        try:
+            import winsound
+            winsound.PlaySound(str(path), winsound.SND_FILENAME)
+            return True
+        except Exception as e:
+            log.warning("winsound playback failed: %s", e)
     try:
         with wave.open(str(path), "rb") as wf:
             ch = wf.getnchannels()
@@ -325,59 +342,44 @@ def _save_pcm_wav_file(path: Path, pcm_bytes: bytes, sample_rate: int) -> None:
         raise
 
 
+def speak_text(text: str) -> None:
+    """Speak text via ElevenLabs or fallback audio."""
+    if not text.strip():
+        return
+    text = text.strip()
+    vid, model_id, output_format, pcm_rate = elevenlabs_env_config()
+    cache_path = _wrock_welcome_cache_path(text, vid or "default", model_id, output_format)
+    if WROCK_WELCOME_CACHE_ENABLED and cache_path.is_file():
+        log.info("Playing speech from cache...")
+        if _play_pcm_wav_file(cache_path):
+            return
+
+    api_key = (os.environ.get("ELEVENLABS_API_KEY") or "").strip()
+    if api_key and vid:
+        try:
+            from elevenlabs.client import ElevenLabs
+            client = ElevenLabs(api_key=api_key)
+            chunks = client.text_to_speech.convert(
+                voice_id=vid,
+                text=text,
+                model_id=model_id,
+                output_format=output_format,
+            )
+            raw = b"".join(chunks)
+            if raw:
+                _save_pcm_wav_file(cache_path, raw, pcm_rate)
+                _play_pcm_wav_file(cache_path)
+                return
+        except Exception as e:
+            log.warning("ElevenLabs TTS failed: %s", e)
+
+    log.info("W.R.O.C.K.: %s", text)
+
+
 def say_wrock_welcome() -> None:
     if not WROCK_WELCOME_ENABLED or not WROCK_WELCOME_PHRASE.strip():
         return
-    text = WROCK_WELCOME_PHRASE.strip()
-    vid, model_id, output_format, pcm_rate = elevenlabs_env_config()
-    if not vid:
-        log.warning("Set ELEVENLABS_VOICE_ID in the environment for ElevenLabs TTS.")
-        return
-
-    cache_path = _wrock_welcome_cache_path(text, vid, model_id, output_format)
-    if WROCK_WELCOME_CACHE_ENABLED and cache_path.is_file():
-        log.info("Playing welcome from cache: %s", cache_path)
-        if _play_pcm_wav_file(cache_path):
-            return
-        log.warning("Cache miss after read failure; fetching from ElevenLabs.")
-
-    api_key = (os.environ.get("ELEVENLABS_API_KEY") or "").strip()
-    if not api_key:
-        log.warning("Set ELEVENLABS_API_KEY in the environment for ElevenLabs TTS.")
-        return
-    try:
-        from elevenlabs.client import ElevenLabs
-    except ImportError:
-        log.warning("Install dependencies: pip install -r requirements.txt")
-        return
-    try:
-        client = ElevenLabs(api_key=api_key)
-        chunks = client.text_to_speech.convert(
-            voice_id=vid,
-            text=text,
-            model_id=model_id,
-            output_format=output_format,
-        )
-        raw = b"".join(chunks)
-    except Exception as e:
-        log.warning("ElevenLabs TTS failed: %s", e)
-        return
-    if not raw:
-        log.warning("ElevenLabs returned empty audio.")
-        return
-    if WROCK_WELCOME_CACHE_ENABLED:
-        try:
-            _save_pcm_wav_file(cache_path, raw, pcm_rate)
-            log.info("Saved welcome audio to cache: %s", cache_path)
-        except OSError as e:
-            log.warning("Could not save welcome cache: %s", e)
-    pcm_i16 = np.frombuffer(raw, dtype=np.int16)
-    pcm_f = pcm_i16.astype(np.float32) / 32768.0
-    try:
-        sd.play(pcm_f, pcm_rate)
-        sd.wait()
-    except Exception as e:
-        log.warning("Could not play ElevenLabs audio: %s", e)
+    speak_text(WROCK_WELCOME_PHRASE)
 
 
 def play_song(uri: str) -> None:
@@ -884,12 +886,81 @@ def _focus_existing_cursor_window_win32() -> bool:
     return True
 
 
+def process_voice_command(cmd: str) -> None:
+    cmd = cmd.lower().strip()
+    log.info("⚡ Executing W.R.O.C.K. Voice Command: %r", cmd)
+    if "youtube" in cmd:
+        open_youtube_in_chrome()
+        speak_text("Opening YouTube, King.")
+    elif "claude" in cmd:
+        open_claude_in_chrome()
+        speak_text("Opening Claude AI.")
+    elif "cursor" in cmd or "code" in cmd or "ide" in cmd:
+        open_cursor_window()
+        speak_text("Opening Cursor IDE.")
+    elif "spotify" in cmd or "music" in cmd or "song" in cmd:
+        play_song(SONG_URI or "https://open.spotify.com")
+        speak_text("Playing music.")
+    elif "search" in cmd or "google" in cmd or "find" in cmd:
+        query = cmd.replace("search", "").replace("google", "").replace("find", "").replace("for", "").strip()
+        url = f"https://www.google.com/search?q={query}" if query else "https://www.google.com"
+        webbrowser.open(url)
+        speak_text(f"Searching for {query or 'Google'}")
+    else:
+        # Default W.R.O.C.K. sequence for custom commands
+        run_double_clap_actions()
+
+
+def listen_and_process_voice_command() -> None:
+    play_activation_chime()
+    log.info("🎙️ [W.R.O.C.K. Activated!] Listening for your voice command...")
+    try:
+        import speech_recognition as sr
+        r = sr.Recognizer()
+        r.energy_threshold = 300
+        r.dynamic_energy_threshold = True
+        with sr.Microphone() as source:
+            log.info("🎤 Listening... Speak your command now!")
+            audio = r.listen(source, timeout=6, phrase_time_limit=8)
+        cmd = r.recognize_google(audio).lower().strip()
+        log.info("🗣️ Recognized Command: %r", cmd)
+        process_voice_command(cmd)
+    except Exception as e:
+        log.info("No distinct voice command heard (%s); launching W.R.O.C.K. workspace...", e)
+        run_double_clap_actions()
+
+
+def voice_wake_word_loop() -> None:
+    """Continuously monitor microphone for wake words like 'wake up wrock' or 'wrock'."""
+    try:
+        import speech_recognition as sr
+        r = sr.Recognizer()
+        r.energy_threshold = 300
+        r.dynamic_energy_threshold = True
+        log.info("🎙️ Voice Wake-Word Engine Active (Say 'Wake up Wrock' or 'Wrock' anytime!)")
+        with sr.Microphone() as source:
+            while True:
+                try:
+                    audio = r.listen(source, timeout=4, phrase_time_limit=5)
+                    text = r.recognize_google(audio).lower().strip()
+                    if any(w in text for w in WAKE_WORDS):
+                        log.info("⚡ Wake-word detected: %r!", text)
+                        listen_and_process_voice_command()
+                except (sr.WaitTimeoutError, sr.UnknownValueError):
+                    pass
+                except Exception:
+                    time.sleep(0.5)
+    except Exception as e:
+        log.warning("Voice wake-word engine notice: %s", e)
+
+
 def run_double_clap_actions() -> None:
     """Run outside the mic loop so sleeps do not stall capture."""
-    play_song(SONG_URI)
     open_claude_in_chrome()
     open_youtube_in_chrome()
     open_custom_actions()
+    if SONG_URI.strip():
+        play_song(SONG_URI)
     if WROCK_WELCOME_ENABLED and WROCK_WELCOME_PHRASE.strip():
         delay = max(0.0, WROCK_AFTER_SONG_DELAY_S)
         if delay:
@@ -998,6 +1069,9 @@ def main() -> int:
         )
 
     input_idx = _choose_input_device(blocksize)
+
+    # Launch background voice wake-word engine ("Wake up Wrock" / "Wrock")
+    threading.Thread(target=voice_wake_word_loop, daemon=True).start()
 
     try:
         with sd.InputStream(
