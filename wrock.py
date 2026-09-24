@@ -45,6 +45,7 @@ import os
 import shutil
 import subprocess
 import sys
+import sqlite3
 import tempfile
 import threading
 import time
@@ -347,10 +348,11 @@ def speak_text(text: str) -> None:
     if not text.strip():
         return
     text = text.strip()
-    log.info("🗣️ W.R.O.C.K. Speaking: %s", text)
+    spoken_text = text.replace("W.R.O.C.K.", "Wrock").replace("W R O C K", "Wrock").replace("W-R-O-C-K", "Wrock")
+    log.info("🗣️ Wrock Speaking: %s", text)
 
     vid, model_id, output_format, pcm_rate = elevenlabs_env_config()
-    cache_path = _wrock_welcome_cache_path(text, vid or "default", model_id, output_format)
+    cache_path = _wrock_welcome_cache_path(spoken_text, vid or "default", model_id, output_format)
     if WROCK_WELCOME_CACHE_ENABLED and cache_path.is_file():
         if _play_pcm_wav_file(cache_path):
             return
@@ -362,7 +364,7 @@ def speak_text(text: str) -> None:
             client = ElevenLabs(api_key=api_key)
             chunks = client.text_to_speech.convert(
                 voice_id=vid,
-                text=text,
+                text=spoken_text,
                 model_id=model_id,
                 output_format=output_format,
             )
@@ -379,7 +381,7 @@ def speak_text(text: str) -> None:
         import pyttsx3
         engine = pyttsx3.init()
         engine.setProperty("rate", 175)
-        engine.say(text)
+        engine.say(spoken_text)
         engine.runAndWait()
     except Exception as e:
         log.warning("pyttsx3 voice fallback notice: %s", e)
@@ -895,9 +897,66 @@ def _focus_existing_cursor_window_win32() -> bool:
     return True
 
 
+class WrockDatabase:
+    """SQLite Database for storing chat history and commands."""
+    def __init__(self, db_path: str = "wrock_chats.db"):
+        self.db_path = db_path
+        self._init_db()
+
+    def _init_db(self) -> None:
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS chat_history (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        user_input TEXT,
+                        assistant_response TEXT,
+                        detected_language TEXT,
+                        action_taken TEXT
+                    )
+                """)
+                conn.commit()
+        except Exception as e:
+            log.warning("Database initialization notice: %s", e)
+
+    def log_interaction(self, user_input: str, response: str, language: str = "en", action: str = "chat") -> None:
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO chat_history (user_input, assistant_response, detected_language, action_taken)
+                    VALUES (?, ?, ?, ?)
+                """, (user_input, response, language, action))
+                conn.commit()
+                log.info("💾 Saved interaction to database [wrock_chats.db]")
+        except Exception as e:
+            log.warning("Database log notice: %s", e)
+
+wrock_db = WrockDatabase()
+
+
+def detect_language(text: str) -> str:
+    """Detect if language is Hindi/Hinglish vs Default English."""
+    t = text.lower()
+    hindi_keywords = {"kaise", "hai", "bhai", "kya", "batao", "karo", "aaj", "suniye", "khol", "namaste", "shukriya", "bajaao", "karna", "haazir", "sab", "apna", "mujhe", "tumhari"}
+    if any(w in t.split() for w in hindi_keywords):
+        return "hi"
+    return "en"
+
+
 def query_grok_ai(user_prompt: str) -> str:
-    """Query xAI Grok API with Hindi Slang & Hinglish system persona, falling back gracefully to local Grok engine."""
+    """Query xAI Grok API with default English or matching language, falling back to local Grok engine."""
+    lang = detect_language(user_prompt)
     api_key = (os.environ.get("XAI_API_KEY") or "").strip()
+    
+    sys_prompt = (
+        "You are Wrock, a smart, fast, witty AI command assistant inspired by Grok for your King. "
+        "DEFAULT RESPONSE LANGUAGE IS ENGLISH. Respond in English unless the user speaks in Hindi or another language. "
+        "If user speaks Hindi/Hinglish, respond in Hinglish with swag. Keep responses short (1-2 sentences)."
+    )
+    
     if api_key:
         try:
             import requests
@@ -908,13 +967,7 @@ def query_grok_ai(user_prompt: str) -> str:
             payload = {
                 "model": "grok-beta",
                 "messages": [
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are W.R.O.C.K., a witty Grok AI assistant with authentic Hindi slang and Hinglish attitude for your King. "
-                            "Keep responses under 2 short sentences. Use words like 'King', 'Bhai', 'Ek number', 'Bilkul mast', 'Scene kya hai'."
-                        ),
-                    },
+                    {"role": "system", "content": sys_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
                 "max_tokens": 100,
@@ -928,49 +981,68 @@ def query_grok_ai(user_prompt: str) -> str:
         except Exception as e:
             log.warning("xAI Grok API call notice: %s", e)
 
-    # Local Hinglish Grok Slang Fallback Engine
+    # Local Engine with Language Switching
     prompt_lower = user_prompt.lower()
-    if "kaise ho" in prompt_lower or "how are you" in prompt_lower:
-        return "Ek number King! Full charging mode me hu, batao aaj kya scene hai?"
-    elif "kon ho" in prompt_lower or "who are you" in prompt_lower:
-        return "Arre bhai! Me hu W.R.O.C.K. (Worlds Reset On Command, King)! Aapka personal Grok AI assistant!"
-    elif "kya kar sakte ho" in prompt_lower or "what can you do" in prompt_lower:
-        return "King, me YouTube, Claude, Cursor open kar sakta hu, aur pure system ko ek aawaz pe control kar sakta hu!"
+    if lang == "hi":
+        if "kaise ho" in prompt_lower:
+            return "Ek number King! Full charging mode me hu, batao aaj kya scene hai?"
+        elif "kon ho" in prompt_lower:
+            return "Arre bhai! Me hu Wrock! Aapka personal Grok AI command assistant!"
+        else:
+            return "Sahi baat hai King! Wrock haazir hai. Aapki aagya sar aankhon par!"
     else:
-        return f"Sahi baat hai King! W.R.O.C.K. haazir hai. Aapki aagya sar aankhon par!"
+        if "how are you" in prompt_lower:
+            return "I am doing great, King! Standing by for your commands."
+        elif "who are you" in prompt_lower:
+            return "I am Wrock, your personal Grok-powered AI command assistant!"
+        elif "what can you do" in prompt_lower:
+            return "I can open applications like YouTube, Claude, Cursor, search the web, and assist you with anything you need, King!"
+        else:
+            return "At your service, King! Tell me what you need."
 
 
 def process_voice_command(cmd: str) -> None:
     cmd = cmd.lower().strip()
-    log.info("⚡ Executing W.R.O.C.K. Grok Command: %r", cmd)
+    lang = detect_language(cmd)
+    log.info("⚡ Executing Wrock Grok Command: %r (Language: %s)", cmd, lang)
+    
+    action = "chat"
     if "youtube" in cmd:
         open_youtube_in_chrome()
-        reply = "Haan King! YouTube abhi khol diya hai, chill karo bhai!"
+        action = "open_youtube"
+        reply = "Haan King! YouTube khol diya hai!" if lang == "hi" else "Opening YouTube for you, King!"
     elif "claude" in cmd:
         open_claude_in_chrome()
-        reply = "Arre King! Claude AI tayyar hai! Batao kya naya build karna hai?"
+        action = "open_claude"
+        reply = "Arre King! Claude AI tayyar hai!" if lang == "hi" else "Opening Claude AI for you, King!"
     elif "cursor" in cmd or "code" in cmd or "ide" in cmd:
         open_cursor_window()
-        reply = "Bilkul bhai! Cursor IDE launch kar diya, coding start karo!"
+        action = "open_cursor"
+        reply = "Bilkul bhai! Cursor IDE launch kar diya!" if lang == "hi" else "Launching Cursor IDE now, King!"
     elif "spotify" in cmd or "music" in cmd or "song" in cmd:
         play_song(SONG_URI or "https://open.spotify.com")
-        reply = "Full vibe mode ON! Spotify pe gaana chaalu kar diya hai, King!"
+        action = "play_music"
+        reply = "Full vibe mode ON! Spotify pe gaana start kar diya hai!" if lang == "hi" else "Starting Spotify music for you, King!"
     elif "search" in cmd or "google" in cmd or "find" in cmd:
         query = cmd.replace("search", "").replace("google", "").replace("find", "").replace("for", "").strip()
         url = f"https://www.google.com/search?q={query}" if query else "https://www.google.com"
         webbrowser.open(url)
-        reply = f"Bhai Google pe {query or 'search'} ki khabar khol di hai, check karo!"
+        action = "web_search"
+        reply = f"Bhai Google pe {query or 'search'} search kar raha hu!" if lang == "hi" else f"Searching Google for {query or 'your search'}, King!"
     else:
         reply = query_grok_ai(cmd)
 
-    log.info("🤖 W.R.O.C.K. (Grok): %s", reply)
+    # Save to SQLite database
+    wrock_db.log_interaction(user_input=cmd, response=reply, language=lang, action=action)
+
+    log.info("🤖 Wrock: %s", reply)
     speak_text(reply)
 
 
 def listen_and_process_voice_command() -> None:
     play_activation_chime()
-    log.info("🎙️ [W.R.O.C.K. Activated!] Listening for your voice command...")
-    speak_text("Haan King! W.R.O.C.K. is active, batao kya karna hai?")
+    log.info("🎙️ [Wrock Activated!] Listening for your voice command...")
+    speak_text("Wrock is active, standing by for your command, King.")
     try:
         import speech_recognition as sr
         r = sr.Recognizer()
