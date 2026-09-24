@@ -886,29 +886,76 @@ def _focus_existing_cursor_window_win32() -> bool:
     return True
 
 
+def query_grok_ai(user_prompt: str) -> str:
+    """Query xAI Grok API with Hindi Slang & Hinglish system persona, falling back gracefully to local Grok engine."""
+    api_key = (os.environ.get("XAI_API_KEY") or "").strip()
+    if api_key:
+        try:
+            import requests
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            }
+            payload = {
+                "model": "grok-beta",
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are W.R.O.C.K., a witty Grok AI assistant with authentic Hindi slang and Hinglish attitude for your King. "
+                            "Keep responses under 2 short sentences. Use words like 'King', 'Bhai', 'Ek number', 'Bilkul mast', 'Scene kya hai'."
+                        ),
+                    },
+                    {"role": "user", "content": user_prompt},
+                ],
+                "max_tokens": 100,
+            }
+            res = requests.post("https://api.x.ai/v1/chat/completions", headers=headers, json=payload, timeout=6)
+            if res.status_code == 200:
+                data = res.json()
+                content = data["choices"][0]["message"]["content"].strip()
+                if content:
+                    return content
+        except Exception as e:
+            log.warning("xAI Grok API call notice: %s", e)
+
+    # Local Hinglish Grok Slang Fallback Engine
+    prompt_lower = user_prompt.lower()
+    if "kaise ho" in prompt_lower or "how are you" in prompt_lower:
+        return "Ek number King! Full charging mode me hu, batao aaj kya scene hai?"
+    elif "kon ho" in prompt_lower or "who are you" in prompt_lower:
+        return "Arre bhai! Me hu W.R.O.C.K. (Worlds Reset On Command, King)! Aapka personal Grok AI assistant!"
+    elif "kya kar sakte ho" in prompt_lower or "what can you do" in prompt_lower:
+        return "King, me YouTube, Claude, Cursor open kar sakta hu, aur pure system ko ek aawaz pe control kar sakta hu!"
+    else:
+        return f"Sahi baat hai King! W.R.O.C.K. haazir hai. Aapki aagya sar aankhon par!"
+
+
 def process_voice_command(cmd: str) -> None:
     cmd = cmd.lower().strip()
-    log.info("⚡ Executing W.R.O.C.K. Voice Command: %r", cmd)
+    log.info("⚡ Executing W.R.O.C.K. Grok Command: %r", cmd)
     if "youtube" in cmd:
         open_youtube_in_chrome()
-        speak_text("Opening YouTube, King.")
+        reply = "Haan King! YouTube abhi khol diya hai, chill karo bhai!"
     elif "claude" in cmd:
         open_claude_in_chrome()
-        speak_text("Opening Claude AI.")
+        reply = "Arre King! Claude AI tayyar hai! Batao kya naya build karna hai?"
     elif "cursor" in cmd or "code" in cmd or "ide" in cmd:
         open_cursor_window()
-        speak_text("Opening Cursor IDE.")
+        reply = "Bilkul bhai! Cursor IDE launch kar diya, coding start karo!"
     elif "spotify" in cmd or "music" in cmd or "song" in cmd:
         play_song(SONG_URI or "https://open.spotify.com")
-        speak_text("Playing music.")
+        reply = "Full vibe mode ON! Spotify pe gaana chaalu kar diya hai, King!"
     elif "search" in cmd or "google" in cmd or "find" in cmd:
         query = cmd.replace("search", "").replace("google", "").replace("find", "").replace("for", "").strip()
         url = f"https://www.google.com/search?q={query}" if query else "https://www.google.com"
         webbrowser.open(url)
-        speak_text(f"Searching for {query or 'Google'}")
+        reply = f"Bhai Google pe {query or 'search'} ki khabar khol di hai, check karo!"
     else:
-        # Default W.R.O.C.K. sequence for custom commands
-        run_double_clap_actions()
+        reply = query_grok_ai(cmd)
+
+    log.info("🤖 W.R.O.C.K. (Grok): %s", reply)
+    speak_text(reply)
 
 
 def listen_and_process_voice_command() -> None:
