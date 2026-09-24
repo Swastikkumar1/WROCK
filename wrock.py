@@ -961,20 +961,25 @@ def process_voice_command(cmd: str) -> None:
 def listen_and_process_voice_command() -> None:
     play_activation_chime()
     log.info("🎙️ [W.R.O.C.K. Activated!] Listening for your voice command...")
+    speak_text("Haan King! W.R.O.C.K. is active, batao kya karna hai?")
     try:
         import speech_recognition as sr
         r = sr.Recognizer()
-        r.energy_threshold = 300
-        r.dynamic_energy_threshold = True
         with sr.Microphone() as source:
+            r.adjust_for_ambient_noise(source, duration=0.3)
             log.info("🎤 Listening... Speak your command now!")
-            audio = r.listen(source, timeout=6, phrase_time_limit=8)
+            audio = r.listen(source, timeout=7, phrase_time_limit=10)
         cmd = r.recognize_google(audio).lower().strip()
         log.info("🗣️ Recognized Command: %r", cmd)
         process_voice_command(cmd)
     except Exception as e:
-        log.info("No distinct voice command heard (%s); launching W.R.O.C.K. workspace...", e)
-        run_double_clap_actions()
+        log.info("No voice command heard (%s). W.R.O.C.K. standing by.", e)
+        speak_text("Koi command nahi mila King. W.R.O.C.K. tayyar hai jab bhi bulaoge.")
+
+
+def run_double_clap_actions() -> None:
+    """Triggered on double clap or wake-word: activates Siri-like command assistant."""
+    listen_and_process_voice_command()
 
 
 def voice_wake_word_loop() -> None:
@@ -982,38 +987,24 @@ def voice_wake_word_loop() -> None:
     try:
         import speech_recognition as sr
         r = sr.Recognizer()
-        r.energy_threshold = 300
-        r.dynamic_energy_threshold = True
         log.info("🎙️ Voice Wake-Word Engine Active (Say 'Wake up Wrock' or 'Wrock' anytime!)")
         with sr.Microphone() as source:
+            r.adjust_for_ambient_noise(source, duration=0.5)
             while True:
                 try:
                     audio = r.listen(source, timeout=4, phrase_time_limit=5)
                     text = r.recognize_google(audio).lower().strip()
+                    log.info("🗣️ Heard speech: %r", text)
                     if any(w in text for w in WAKE_WORDS):
                         log.info("⚡ Wake-word detected: %r!", text)
                         listen_and_process_voice_command()
                 except (sr.WaitTimeoutError, sr.UnknownValueError):
                     pass
-                except Exception:
+                except Exception as e:
+                    log.debug("Wake loop notice: %s", e)
                     time.sleep(0.5)
     except Exception as e:
         log.warning("Voice wake-word engine notice: %s", e)
-
-
-def run_double_clap_actions() -> None:
-    """Run outside the mic loop so sleeps do not stall capture."""
-    open_claude_in_chrome()
-    open_youtube_in_chrome()
-    open_custom_actions()
-    if SONG_URI.strip():
-        play_song(SONG_URI)
-    if WROCK_WELCOME_ENABLED and WROCK_WELCOME_PHRASE.strip():
-        delay = max(0.0, WROCK_AFTER_SONG_DELAY_S)
-        if delay:
-            time.sleep(delay)
-        threading.Thread(target=say_wrock_welcome, daemon=True).start()
-    open_cursor_window()
 
 
 def open_cursor_window() -> None:
