@@ -937,24 +937,56 @@ class WrockDatabase:
 wrock_db = WrockDatabase()
 
 
-def detect_language(text: str) -> str:
-    """Detect if language is Hindi/Hinglish vs Default English."""
-    t = text.lower()
-    hindi_keywords = {"kaise", "hai", "bhai", "kya", "batao", "karo", "aaj", "suniye", "khol", "namaste", "shukriya", "bajaao", "karna", "haazir", "sab", "apna", "mujhe", "tumhari"}
-    if any(w in t.split() for w in hindi_keywords):
+def detect_script_lang(text: str) -> str:
+    """Detect language based on Unicode script or transliterated keywords (Odia, Bengali, Hindi, English)."""
+    t = text.strip()
+    if not t:
+        return "en"
+    # Unicode Script range checks
+    for char in t:
+        cp = ord(char)
+        if 0x0B00 <= cp <= 0x0B7F:
+            return "or"  # Odia script
+        elif 0x0980 <= cp <= 0x09FF:
+            return "bn"  # Bengali script
+        elif 0x0900 <= cp <= 0x097F:
+            return "hi"  # Devanagari / Hindi script
+
+    t_lower = t.lower()
+    # Transliterated Odia keywords
+    if any(w in t_lower.split() for w in {"kemitia", "achanti", "namaskar", "kan", "khabar", "odisha", "bhala", "ghara", "kholideba"}):
+        return "or"
+
+    # Transliterated Bengali keywords
+    if any(w in t_lower.split() for w in {"kemon", "achhen", "khobor", "amra", "bangla", "bhalo", "ki", "dada", "khule"}):
+        return "bn"
+
+    # Transliterated Hindi keywords
+    if any(w in t_lower.split() for w in {"kaise", "hai", "bhai", "kya", "batao", "karo", "aaj", "suniye", "khol", "namaste", "shukriya", "bajaao", "karna", "haazir", "sab", "apna", "mujhe", "tumhari"}):
         return "hi"
+
+    try:
+        from langdetect import detect
+        d = detect(t)
+        if d:
+            return d
+    except Exception:
+        pass
+
     return "en"
 
 
 def query_grok_ai(user_prompt: str) -> str:
-    """Query xAI Grok API with default English or matching language, falling back to local Grok engine."""
-    lang = detect_language(user_prompt)
+    """Query xAI Grok API with universal multi-lingual response capability (Odia, Bengali, Hindi, English, etc.)."""
+    lang = detect_script_lang(user_prompt)
     api_key = (os.environ.get("XAI_API_KEY") or "").strip()
     
     sys_prompt = (
-        "You are Wrock, a smart, fast, witty AI command assistant inspired by Grok for your King. "
-        "DEFAULT RESPONSE LANGUAGE IS ENGLISH. Respond in English unless the user speaks in Hindi or another language. "
-        "If user speaks Hindi/Hinglish, respond in Hinglish with swag. Keep responses short (1-2 sentences)."
+        "You are Wrock, an ultra-fast, world-class AI voice assistant inspired by Grok for your King. "
+        "You are fluent in Odia, Bengali, Hindi, English, Spanish, French, German, and all world languages. "
+        "ALWAYS RESPOND IN THE EXACT SAME LANGUAGE AND SCRIPT/DIALECT THAT THE USER SPOKE IN. "
+        "If the user speaks in Odia, answer in Odia. If Bengali, answer in Bengali. If Hindi, answer in Hinglish/Hindi. If English, answer in English. "
+        "Keep responses intelligent, concise (1-2 sentences), witty, and respectful to your King."
     )
     
     if api_key:
@@ -970,7 +1002,7 @@ def query_grok_ai(user_prompt: str) -> str:
                     {"role": "system", "content": sys_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                "max_tokens": 100,
+                "max_tokens": 120,
             }
             res = requests.post("https://api.x.ai/v1/chat/completions", headers=headers, json=payload, timeout=6)
             if res.status_code == 200:
@@ -981,13 +1013,21 @@ def query_grok_ai(user_prompt: str) -> str:
         except Exception as e:
             log.warning("xAI Grok API call notice: %s", e)
 
-    # Local Engine with Language Switching
+    # Local Engine with Multi-Language Support
     prompt_lower = user_prompt.lower()
-    if lang == "hi":
+    if lang == "or":
+        if "kemitia" in prompt_lower or "achanti" in prompt_lower:
+            return "Mo bhala achhi King! Aapana kemiti achanti? Bataantu aaji kana kariba?"
+        else:
+            return "Haan King! Wrock aapanka seba re haajir achhi!"
+    elif lang == "bn":
+        if "kemon" in prompt_lower or "achhen" in prompt_lower:
+            return "Ami bhalo achhi King! Apni kemon achhen? Bolun ajke ki korbo?"
+        else:
+            return "Haan King! Wrock apnar sebay prostut achhe!"
+    elif lang == "hi":
         if "kaise ho" in prompt_lower:
             return "Ek number King! Full charging mode me hu, batao aaj kya scene hai?"
-        elif "kon ho" in prompt_lower:
-            return "Arre bhai! Me hu Wrock! Aapka personal Grok AI command assistant!"
         else:
             return "Sahi baat hai King! Wrock haazir hai. Aapki aagya sar aankhon par!"
     else:
@@ -996,39 +1036,71 @@ def query_grok_ai(user_prompt: str) -> str:
         elif "who are you" in prompt_lower:
             return "I am Wrock, your personal Grok-powered AI command assistant!"
         elif "what can you do" in prompt_lower:
-            return "I can open applications like YouTube, Claude, Cursor, search the web, and assist you with anything you need, King!"
+            return "I can open applications, search the web, execute system commands, and assist you in any language, King!"
         else:
             return "At your service, King! Tell me what you need."
 
 
 def process_voice_command(cmd: str) -> None:
     cmd = cmd.lower().strip()
-    lang = detect_language(cmd)
+    lang = detect_script_lang(cmd)
     log.info("⚡ Executing Wrock Grok Command: %r (Language: %s)", cmd, lang)
     
     action = "chat"
     if "youtube" in cmd:
         open_youtube_in_chrome()
         action = "open_youtube"
-        reply = "Haan King! YouTube khol diya hai!" if lang == "hi" else "Opening YouTube for you, King!"
+        if lang == "or":
+            reply = "Haan King! YouTube kholi deli!"
+        elif lang == "bn":
+            reply = "Haan King! YouTube khule dichhi!"
+        elif lang == "hi":
+            reply = "Haan King! YouTube khol diya hai!"
+        else:
+            reply = "Opening YouTube for you, King!"
     elif "claude" in cmd:
         open_claude_in_chrome()
         action = "open_claude"
-        reply = "Arre King! Claude AI tayyar hai!" if lang == "hi" else "Opening Claude AI for you, King!"
+        reply = "Opening Claude AI for you, King!"
     elif "cursor" in cmd or "code" in cmd or "ide" in cmd:
         open_cursor_window()
         action = "open_cursor"
-        reply = "Bilkul bhai! Cursor IDE launch kar diya!" if lang == "hi" else "Launching Cursor IDE now, King!"
+        reply = "Launching Cursor IDE now, King!"
     elif "spotify" in cmd or "music" in cmd or "song" in cmd:
         play_song(SONG_URI or "https://open.spotify.com")
         action = "play_music"
-        reply = "Full vibe mode ON! Spotify pe gaana start kar diya hai!" if lang == "hi" else "Starting Spotify music for you, King!"
+        reply = "Starting Spotify music for you, King!"
+    elif "time" in cmd or "samay" in cmd or "samaya" in cmd:
+        action = "tell_time"
+        now_str = time.strftime("%I:%M %p")
+        reply = f"Current time is {now_str}, King."
+    elif "date" in cmd or "taarikh" in cmd:
+        action = "tell_date"
+        date_str = time.strftime("%A, %B %d, %Y")
+        reply = f"Today is {date_str}, King."
+    elif "calculator" in cmd or "calc" in cmd:
+        action = "open_calculator"
+        try:
+            subprocess.Popen(["calc.exe"])
+            reply = "Opening Calculator for you, King."
+        except Exception:
+            reply = "Could not open Calculator."
+    elif "notepad" in cmd:
+        action = "open_notepad"
+        try:
+            subprocess.Popen(["notepad.exe"])
+            reply = "Opening Notepad for you, King."
+        except Exception:
+            reply = "Could not open Notepad."
     elif "search" in cmd or "google" in cmd or "find" in cmd:
         query = cmd.replace("search", "").replace("google", "").replace("find", "").replace("for", "").strip()
         url = f"https://www.google.com/search?q={query}" if query else "https://www.google.com"
         webbrowser.open(url)
         action = "web_search"
-        reply = f"Bhai Google pe {query or 'search'} search kar raha hu!" if lang == "hi" else f"Searching Google for {query or 'your search'}, King!"
+        if lang == "hi":
+            reply = f"Bhai Google pe {query or 'search'} search kar raha hu!"
+        else:
+            reply = f"Searching Google for {query or 'your search'}, King!"
     else:
         reply = query_grok_ai(cmd)
 
@@ -1300,16 +1372,42 @@ def test_mic_live() -> None:
         print("\nMic test stopped.\n")
 
 
+def print_chat_history() -> None:
+    """Print conversation history from wrock_chats.db."""
+    print("\n=======================================================")
+    print("       WROCK AI ASSISTANT -- CONVERSATION HISTORY       ")
+    print("=======================================================\n")
+    try:
+        with sqlite3.connect("wrock_chats.db") as conn:
+            cursor = conn.cursor()
+            rows = cursor.execute(
+                "SELECT timestamp, user_input, assistant_response, detected_language, action_taken "
+                "FROM chat_history ORDER BY id DESC LIMIT 25"
+            ).fetchall()
+            if not rows:
+                print("No history found in database yet.")
+                return
+            for ts, inp, resp, lang, act in rows:
+                print(f"[{ts}] [{lang.upper()}] ({act})")
+                print(f"  User: {inp}")
+                print(f"  Wrock: {resp}\n")
+    except Exception as e:
+        print(f"Could not read database history: {e}")
+
+
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         arg = sys.argv[1].lower()
         if arg in ("--test-actions", "-a", "test-actions"):
-            print("🚀 Running all W.R.O.C.K. actions test...")
+            print("🚀 Running all Wrock actions test...")
             run_double_clap_actions()
             time.sleep(3)
             sys.exit(0)
         elif arg in ("--test-mic", "-m", "test-mic"):
             test_mic_live()
+            sys.exit(0)
+        elif arg in ("--history", "-h", "history"):
+            print_chat_history()
             sys.exit(0)
 
     sys.exit(main())
