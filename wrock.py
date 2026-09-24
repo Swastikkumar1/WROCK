@@ -343,14 +343,15 @@ def _save_pcm_wav_file(path: Path, pcm_bytes: bytes, sample_rate: int) -> None:
 
 
 def speak_text(text: str) -> None:
-    """Speak text via ElevenLabs or fallback audio."""
+    """Speak text via ElevenLabs or offline pyttsx3 voice."""
     if not text.strip():
         return
     text = text.strip()
+    log.info("🗣️ W.R.O.C.K. Speaking: %s", text)
+
     vid, model_id, output_format, pcm_rate = elevenlabs_env_config()
     cache_path = _wrock_welcome_cache_path(text, vid or "default", model_id, output_format)
     if WROCK_WELCOME_CACHE_ENABLED and cache_path.is_file():
-        log.info("Playing speech from cache...")
         if _play_pcm_wav_file(cache_path):
             return
 
@@ -371,9 +372,17 @@ def speak_text(text: str) -> None:
                 _play_pcm_wav_file(cache_path)
                 return
         except Exception as e:
-            log.warning("ElevenLabs TTS failed: %s", e)
+            log.warning("ElevenLabs TTS notice: %s. Switching to pyttsx3 voice engine...", e)
 
-    log.info("W.R.O.C.K.: %s", text)
+    # Offline pyttsx3 voice engine (100% reliable sound output!)
+    try:
+        import pyttsx3
+        engine = pyttsx3.init()
+        engine.setProperty("rate", 175)
+        engine.say(text)
+        engine.runAndWait()
+    except Exception as e:
+        log.warning("pyttsx3 voice fallback notice: %s", e)
 
 
 def say_wrock_welcome() -> None:
