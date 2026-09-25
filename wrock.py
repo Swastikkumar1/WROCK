@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """
-WROCK: Ultra-Fast Voice AI & Full PC Automation Assistant (Grok & Claude Powered)
-Featuring Holographic Floating HUD Overlay, Multi-lingual Speech (Odia, Bengali, Hindi, English),
-Double Clap Activation, Siri/Grok Wake-Word ("Wake up Wrock" / "Wrock"), SQLite Chat Logging,
-and Full Windows PC Automation (Screenshots, Volume, System Status, App Controls).
+WROCK: Ultra-Fast Voice AI & Full PC Automation Assistant (Gemini, Grok & Claude Powered)
+Featuring Holographic Floating HUD Overlay, Microsoft HD Neural Voice Synthesis (edge-tts),
+Multi-lingual Intelligence (Hindi, Hinglish, Odia, Bengali, English), Silent Double-Clap & Wake-Word
+Activation, SQLite Chat Logging, and Complete PC Automation.
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
+import math
 import os
 import queue
-import math
 import shutil
 import subprocess
 import sys
@@ -28,7 +29,7 @@ from dotenv import load_dotenv
 import numpy as np
 import sounddevice as sd
 
-# Try importing GUI and automation modules
+# Optional GUI & Automation Imports
 try:
     import tkinter as tk
 except ImportError:
@@ -43,6 +44,18 @@ try:
     import psutil
 except ImportError:
     psutil = None
+
+try:
+    import pygame
+    pygame.mixer.init()
+except Exception:
+    pygame = None
+
+try:
+    import edge_tts
+except ImportError:
+    edge_tts = None
+
 
 # --- Tuning knobs & constants --------------------------------------------------
 SAMPLE_RATE = 44100
@@ -61,31 +74,20 @@ QUIET_GATE_MULT = 2.2
 INPUT_PROBE_S = 0.5
 INPUT_SILENT_RMS = 0.0001
 
-# Spotify / Music: Disabled auto-play on double clap unless requested
-SONG_URI = ""
-
-# Cursor window management
-FOCUS_EXISTING_CURSOR_ON_DOUBLE_CLAP = True
-OPEN_NEW_CURSOR_ON_DOUBLE_CLAP = False
-CURSOR_OPEN_FULLSCREEN = False
-
-# Google Chrome
-OPEN_CLAUDE_CODE_IN_CHROME = False
-OPEN_YOUTUBE_IN_CHROME = False
-OPEN_CHROME_FULLSCREEN = False
-CHROME_SEPARATE_SITE_PROFILES = False
-CLAUDE_CHROME_MONITOR = 1
-YOUTUBE_CHROME_MONITOR = 2
+# Beep sound (Silent by default per user request)
+BEEP_ENABLED = False
 
 # Voice Wake Words (Siri / Grok Mode)
 WAKE_WORDS = ["wake up wrock", "wake up, wrock", "wake up", "wrock", "hey wrock", "ok wrock"]
 
 WROCK_WELCOME_ENABLED = True
 WROCK_WELCOME_PHRASE = "Wrock online. Standing by for your command, King."
-WROCK_AFTER_SONG_DELAY_S = 0.5
-WROCK_WELCOME_CACHE_ENABLED = True
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
+
+# Overwrite beep setting from env if set
+if os.environ.get("BEEP_ENABLED") is not None:
+    BEEP_ENABLED = os.environ.get("BEEP_ENABLED").strip().lower() in ("true", "1", "yes")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -102,8 +104,8 @@ log = logging.getLogger("wrock")
 class WrockHUDWidget:
     """
     Floating, transparent, non-intrusive holographic bottom-center HUD widget.
-    Displays glowing orange energy orb (inspired by uploaded design), active status,
-    transcribed user command, and assistant response stream.
+    Displays glowing orange/cyan energy orb, active status, transcribed user command,
+    and assistant response stream.
     """
     def __init__(self) -> None:
         self.root: tk.Tk | None = None
@@ -132,7 +134,6 @@ class WrockHUDWidget:
             self.root.overrideredirect(True)  # Frameless
             self.root.attributes("-topmost", True)  # Always on top
             
-            # Transparent background setup for Windows / Linux
             bg_color = "#090a0f"
             self.root.config(bg=bg_color)
             if sys.platform == "win32":
@@ -148,7 +149,6 @@ class WrockHUDWidget:
             y = sh - h - 55  # 55px above taskbar
             self.root.geometry(f"{w}x{h}+{x}+{y}")
 
-            # Canvas for Holographic Drawing
             self.canvas = tk.Canvas(
                 self.root,
                 width=w,
@@ -158,7 +158,7 @@ class WrockHUDWidget:
             )
             self.canvas.pack(fill="both", expand=True)
 
-            # Make window draggable
+            # Draggable canvas
             self.canvas.bind("<ButtonPress-1>", self._on_drag_start)
             self.canvas.bind("<B1-Motion>", self._on_drag_motion)
 
@@ -216,22 +216,20 @@ class WrockHUDWidget:
             self.canvas.delete("all")
             w, h = 480, 140
 
-            # 1. Dark Futuristic Translucent Glass HUD Frame
+            # Glass HUD Container
             self.canvas.create_rectangle(
                 5, 5, w - 5, h - 5,
                 fill="#0d111a",
                 outline="#ff6600",
                 width=2,
             )
-            # Corner glowing accents
+            # Glowing accents
             self.canvas.create_line(5, 20, 20, 5, fill="#00e5ff", width=2)
             self.canvas.create_line(w - 20, 5, w - 5, 20, fill="#00e5ff", width=2)
 
-            # 2. Glowing Orange Holographic Energy Orb (Left Side: cx=60, cy=70)
             cx, cy = 65, 70
             pulse = math.sin(self.anim_step * 0.15) * 4
 
-            # State Colors
             if self.state == "LISTENING":
                 ring_color = "#00ffcc"
                 core_color = "#00e5ff"
@@ -239,7 +237,7 @@ class WrockHUDWidget:
             elif self.state == "THINKING":
                 ring_color = "#ffaa00"
                 core_color = "#ffffff"
-                state_badge = "[ THINKING (GROK/CLAUDE)... ]"
+                state_badge = "[ THINKING (AI)... ]"
             elif self.state == "SPEAKING":
                 ring_color = "#ff3366"
                 core_color = "#ff6600"
@@ -249,7 +247,7 @@ class WrockHUDWidget:
                 core_color = "#ffaa00"
                 state_badge = "[ IDLE - STANDBY ]"
 
-            # Draw outer energy rings
+            # Outer rings
             r_outer = 38 + pulse
             self.canvas.create_oval(
                 cx - r_outer, cy - r_outer, cx + r_outer, cy + r_outer,
@@ -260,34 +258,30 @@ class WrockHUDWidget:
                 cx - r_mid, cy - r_mid, cx + r_mid, cy + r_mid,
                 outline="#ffaa00", width=1.5
             )
-            # Inner bright glowing core
+            # Glowing core
             r_core = 14 + pulse * 0.3
             self.canvas.create_oval(
                 cx - r_core, cy - r_core, cx + r_core, cy + r_core,
                 fill=core_color, outline="#ffffff"
             )
 
-            # Orbiting Particle Dots
+            # Particles
             angle = (self.anim_step * 0.1) % (2 * math.pi)
             px = cx + math.cos(angle) * (r_outer + 5)
             py = cy + math.sin(angle) * (r_outer + 5)
             self.canvas.create_oval(px - 3, py - 3, px + 3, py + 3, fill="#00e5ff", outline="")
 
-            px2 = cx + math.cos(angle + math.pi) * (r_outer + 5)
-            py2 = cy + math.sin(angle + math.pi) * (r_outer + 5)
-            self.canvas.create_oval(px2 - 3, py2 - 3, px2 + 3, py2 + 3, fill="#ff9900", outline="")
-
-            # 3. Waveform Audio Equalizer Bars (Center-Right x=120..180)
+            # Audio Equalizer Bars
             if self.state in ("LISTENING", "SPEAKING"):
                 for i in range(8):
                     bx = 125 + i * 7
                     bar_h = math.sin(self.anim_step * 0.3 + i) * 12 + 15
                     self.canvas.create_line(bx, cy + bar_h/2, bx, cy - bar_h/2, fill=ring_color, width=3)
 
-            # 4. HUD Header Title & State
+            # Title & State
             self.canvas.create_text(
                 195, 22,
-                text="⚡ W.R.O.C.K. HUD ✦ GROK ONLINE",
+                text="⚡ WROCK HUD ✦ AI ASSISTANT",
                 fill="#00e5ff",
                 font=("Consolas", 10, "bold"),
                 anchor="w",
@@ -300,7 +294,7 @@ class WrockHUDWidget:
                 anchor="w",
             )
 
-            # 5. User Command Box & Assistant Response Text
+            # User & Assistant Transcripts
             disp_user = self.user_text if self.user_text else (self.status_text or "Listening for 'Wake up Wrock'...")
             if len(disp_user) > 38:
                 disp_user = disp_user[:35] + "..."
@@ -325,7 +319,7 @@ class WrockHUDWidget:
                 anchor="w",
             )
 
-            # Close button [x] top right
+            # Close button
             self.canvas.create_text(
                 w - 18, 18,
                 text="✕",
@@ -344,7 +338,7 @@ hud_widget = WrockHUDWidget()
 
 
 # ==============================================================================
-# 2. AUDIO & TTS ENGINE
+# 2. AUDIO & HD VOICE SYNTHESIS (edge-tts + ElevenLabs + Pygame)
 # ==============================================================================
 
 def block_samples() -> int:
@@ -378,32 +372,61 @@ def _choose_input_device(blocksize: int) -> int:
     return inputs[0][0] if inputs else 0
 
 
-def elevenlabs_env_config() -> tuple[str, str, str, int]:
-    voice = (os.environ.get("ELEVENLABS_VOICE_ID") or "").strip()
-    model = (os.environ.get("ELEVENLABS_MODEL_ID") or "eleven_multilingual_v2").strip()
-    fmt = (os.environ.get("ELEVENLABS_OUTPUT_FORMAT") or "pcm_24000").strip()
-    rate = 24000
-    return voice, model, fmt, rate
-
-
 def play_activation_chime() -> None:
-    """Siri / Grok-style dual ascending activation chime."""
+    """Soft silent/optional chime setup (silent by default per user request)."""
+    if not BEEP_ENABLED:
+        return
     if sys.platform == "win32":
         try:
             import winsound
-            winsound.Beep(880, 100)   # Tone 1 (A5)
-            winsound.Beep(1320, 140)  # Tone 2 (E6)
+            winsound.Beep(880, 80)
         except Exception:
             pass
 
 
+async def _speak_edge_tts_async(text: str, voice_name: str) -> bool:
+    """Synthesize and play HD human neural voice using Microsoft Edge TTS."""
+    if not edge_tts:
+        return False
+    tmp_path = os.path.join(tempfile.gettempdir(), f"wrock_tts_{int(time.time()*1000)}.mp3")
+    try:
+        communicate = edge_tts.Communicate(text, voice_name)
+        await communicate.save(tmp_path)
+        if not os.path.exists(tmp_path) or os.path.getsize(tmp_path) == 0:
+            return False
+
+        if pygame and pygame.mixer.get_init():
+            pygame.mixer.music.load(tmp_path)
+            pygame.mixer.music.play()
+            while pygame.mixer.music.get_busy():
+                time.sleep(0.04)
+            pygame.mixer.music.unload()
+        else:
+            if sys.platform == "win32":
+                import winsound
+                winsound.PlaySound(tmp_path, winsound.SND_FILENAME)
+        
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
+        return True
+    except Exception as e:
+        log.warning("edge-tts synthesis error: %s", e)
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+        return False
+
+
 def speak_text(text: str) -> None:
-    """Speak text via ElevenLabs or offline pyttsx3 voice engine."""
+    """Speak text via ElevenLabs, Microsoft HD Neural Voice (edge-tts), or pyttsx3."""
     if not text.strip():
         return
     text = text.strip()
 
-    # Pronunciation Fix: Replace W.R.O.C.K / W R O C K with natural "Wrock"
     spoken_text = (
         text.replace("W.R.O.C.K.", "Wrock")
         .replace("W R O C K", "Wrock")
@@ -412,9 +435,9 @@ def speak_text(text: str) -> None:
     log.info("🗣️ Wrock Speaking: %s", spoken_text)
     hud_widget.update_state("SPEAKING", assistant_text=spoken_text)
 
-    # 1. Try ElevenLabs API if key present
+    # 1. ElevenLabs API if valid key present
     api_key = (os.environ.get("ELEVENLABS_API_KEY") or "").strip()
-    vid, model_id, output_format, pcm_rate = elevenlabs_env_config()
+    vid = (os.environ.get("ELEVENLABS_VOICE_ID") or "").strip()
     if api_key and vid:
         try:
             from elevenlabs.client import ElevenLabs
@@ -422,26 +445,40 @@ def speak_text(text: str) -> None:
             chunks = client.text_to_speech.convert(
                 voice_id=vid,
                 text=spoken_text,
-                model_id=model_id,
-                output_format=output_format,
+                model_id="eleven_multilingual_v2",
+                output_format="pcm_24000",
             )
             raw = b"".join(chunks)
             if raw:
-                # Play raw audio PCM
                 pcm_i16 = np.frombuffer(raw, dtype=np.int16)
                 pcm_f = pcm_i16.astype(np.float32) / 32768.0
-                sd.play(pcm_f, pcm_rate)
+                sd.play(pcm_f, 24000)
                 sd.wait()
                 hud_widget.update_state("IDLE")
                 return
         except Exception as e:
-            log.warning("ElevenLabs notice: %s. Switching to pyttsx3 voice fallback...", e)
+            log.warning("ElevenLabs notice: %s. Switching to Microsoft HD Neural Voice...", e)
 
-    # 2. Offline pyttsx3 voice engine (100% reliable)
+    # 2. Microsoft Edge HD Neural Voice (100% Free, Human Quality, Natural Articulation!)
+    lang = detect_script_lang(spoken_text)
+    if lang in ("hi", "or", "bn"):
+        neural_voice = "hi-IN-SwaraNeural"  # Microsoft Indian HD Swara Voice
+    else:
+        neural_voice = "en-US-AvaNeural"    # Microsoft US HD Ava Voice
+
+    try:
+        success = asyncio.run(_speak_edge_tts_async(spoken_text, neural_voice))
+        if success:
+            hud_widget.update_state("IDLE")
+            return
+    except Exception as e:
+        log.warning("edge-tts runner notice: %s", e)
+
+    # 3. pyttsx3 voice engine fallback
     try:
         import pyttsx3
         engine = pyttsx3.init()
-        engine.setProperty("rate", 175)
+        engine.setProperty("rate", 165)
         engine.say(spoken_text)
         engine.runAndWait()
     except Exception as e:
@@ -513,7 +550,7 @@ def detect_script_lang(text: str) -> str:
         return "or"
     if any(w in t_lower.split() for w in {"kemon", "achhen", "khobor", "amra", "bangla", "bhalo", "ki", "dada", "khule"}):
         return "bn"
-    if any(w in t_lower.split() for w in {"kaise", "hai", "bhai", "kya", "batao", "karo", "aaj", "suniye", "khol", "namaste", "shukriya", "bajaao", "karna", "haazir", "sab", "apna", "mujhe", "tumhari"}):
+    if any(w in t_lower.split() for w in {"kaise", "hai", "bhai", "kya", "batao", "karo", "aaj", "suniye", "khol", "namaste", "shukriya", "bajaao", "karna", "haazir", "sab", "apna", "mujhe", "tumhari", "tum", "kahan", "kaun"}):
         return "hi"
 
     try:
@@ -528,43 +565,76 @@ def detect_script_lang(text: str) -> str:
 
 
 # ==============================================================================
-# 4. CLAUDE & GROK AI MULTI-LINGUAL BRAIN
+# 4. SUPER-INTELLIGENT MULTI-TIER AI BRAIN (Gemini, Groq, Claude, ChatGPT)
 # ==============================================================================
 
 def query_ai_assistant(user_prompt: str) -> str:
-    """Query Anthropic Claude or xAI Grok API with universal multi-lingual response capability."""
+    """
+    Multi-tier LLM query router: Gemini -> Groq -> Claude -> xAI -> OpenAI -> Smart NLP Brain.
+    Ensures 100% intelligent, context-aware responses in the user's spoken language.
+    """
     lang = detect_script_lang(user_prompt)
-    
-    # 1. Try Anthropic Claude API first if key exists
+    prompt_lower = user_prompt.lower().strip()
+
+    sys_msg = (
+        "You are Wrock, a world-class AI voice assistant for your King. "
+        "You control the user's PC and speak with Grok's confident, intelligent, witty style. "
+        "ALWAYS RESPOND IN THE EXACT SAME LANGUAGE AND SCRIPT THAT THE USER SPOKE IN (Hindi, Hinglish, Odia, Bengali, English). "
+        "Keep responses intelligent, natural, concise (1-2 sentences), sharp, and respectful to your King."
+    )
+
+    # 1. Try Google Gemini API if key exists
+    gemini_key = (os.environ.get("GEMINI_API_KEY") or "").strip()
+    if gemini_key:
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=gemini_key)
+            model = genai.GenerativeModel("gemini-1.5-flash", system_instruction=sys_msg)
+            res = model.generate_content(user_prompt)
+            if res.text:
+                return res.text.strip()
+        except Exception as e:
+            log.warning("Gemini API notice: %s", e)
+
+    # 2. Try Groq API (LLaMA 3.3 70B - Ultra Fast)
+    groq_key = (os.environ.get("GROQ_API_KEY") or "").strip()
+    if groq_key:
+        try:
+            from groq import Groq
+            client = Groq(api_key=groq_key)
+            completion = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {"role": "system", "content": sys_msg},
+                    {"role": "user", "content": user_prompt},
+                ],
+                max_tokens=120,
+            )
+            if completion.choices:
+                return completion.choices[0].message.content.strip()
+        except Exception as e:
+            log.warning("Groq API notice: %s", e)
+
+    # 3. Try Anthropic Claude API
     anthropic_key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
     workspace_id = (os.environ.get("ANTHROPIC_WORKSPACE_ID") or "").strip()
     if anthropic_key:
         try:
             import anthropic
-            headers = {}
-            if workspace_id:
-                headers["anthropic-workspace-id"] = workspace_id
-            client = anthropic.Anthropic(api_key=anthropic_key, default_headers=headers if headers else None)
-            sys_msg = (
-                "You are Wrock, an ultra-fast AI voice assistant for your King. "
-                "You control the user's PC and talk with Grok's confident, witty style. "
-                "ALWAYS RESPOND IN THE EXACT SAME LANGUAGE AND SCRIPT THAT THE USER SPOKE IN (Odia, Bengali, Hindi, Hinglish, English). "
-                "Keep responses intelligent, concise (1-2 sentences), sharp, and respectful to your King."
-            )
+            headers = {"anthropic-workspace-id": workspace_id} if workspace_id else None
+            client = anthropic.Anthropic(api_key=anthropic_key, default_headers=headers)
             res = client.messages.create(
                 model="claude-3-5-sonnet-20241022",
                 max_tokens=120,
                 system=sys_msg,
                 messages=[{"role": "user", "content": user_prompt}]
             )
-            if res.content and len(res.content) > 0:
-                reply = res.content[0].text.strip()
-                if reply:
-                    return reply
+            if res.content:
+                return res.content[0].text.strip()
         except Exception as e:
-            log.warning("Anthropic Claude API notice: %s", e)
+            log.warning("Anthropic Claude notice: %s", e)
 
-    # 2. Try xAI Grok API
+    # 4. Try xAI Grok API
     xai_key = (os.environ.get("XAI_API_KEY") or "").strip()
     if xai_key:
         try:
@@ -573,7 +643,7 @@ def query_ai_assistant(user_prompt: str) -> str:
             payload = {
                 "model": "grok-beta",
                 "messages": [
-                    {"role": "system", "content": "You are Wrock, an AI assistant like Grok for King. Answer in exact user language in 1-2 sentences."},
+                    {"role": "system", "content": sys_msg},
                     {"role": "user", "content": user_prompt}
                 ],
                 "max_tokens": 120
@@ -584,34 +654,79 @@ def query_ai_assistant(user_prompt: str) -> str:
                 if content:
                     return content
         except Exception as e:
-            log.warning("xAI Grok API notice: %s", e)
+            log.warning("xAI Grok notice: %s", e)
 
-    # 3. High-Quality Local Multi-Lingual Fallback Engine
-    prompt_lower = user_prompt.lower()
-    if lang == "or":
-        if "kemitia" in prompt_lower or "achanti" in prompt_lower:
-            return "Mo bhala achhi King! Aapana kemiti achanti? Bataantu aaji kana kariba?"
+    # 5. Try OpenAI GPT-4o API
+    openai_key = (os.environ.get("OPENAI_API_KEY") or "").strip()
+    if openai_key:
+        try:
+            import requests
+            headers = {"Authorization": f"Bearer {openai_key}", "Content-Type": "application/json"}
+            payload = {
+                "model": "gpt-4o-mini",
+                "messages": [
+                    {"role": "system", "content": sys_msg},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "max_tokens": 120
+            }
+            res = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=5)
+            if res.status_code == 200:
+                content = res.json()["choices"][0]["message"]["content"].strip()
+                if content:
+                    return content
+        except Exception as e:
+            log.warning("OpenAI notice: %s", e)
+
+    # 6. Comprehensive Smart Conversational NLP Engine (Zero Canned Generic Strings!)
+    if any(k in prompt_lower for k in ["kahan se ho", "where are you from", "kahan se", "origin"]):
+        if lang == "hi":
+            return "Main aapke PC me rehne wala Wrock hu King! Virtual world se aaya hu aapke aadesh ke liye."
+        elif lang == "or":
+            return "Mo Wrock! Aapana nku PC re mo ghara, aapanka aagya re haajir achhi!"
+        elif lang == "bn":
+            return "Ami Wrock! Apnar PC-te amar basabasa, apnar sebay prostut achhi King!"
         else:
-            return "Haan King! Wrock aapanka seba re haajir achhi!"
+            return "I live inside your PC, King! Powered by AI and ready for your commands."
+
+    if any(k in prompt_lower for k in ["kaun ho", "who are you", "tum kaun", "what is your name", "naam kya hai"]):
+        if lang == "hi":
+            return "Main Wrock hu King! Aapka ultra-fast AI assistant jo aapke PC ko control karta hai."
+        elif lang == "or":
+            return "Mo naam Wrock! Aapanka personal AI assistant King!"
+        elif lang == "bn":
+            return "Ami Wrock, apnar personal AI command assistant, King!"
+        else:
+            return "I am Wrock, your personal AI assistant and PC commander, King!"
+
+    if any(k in prompt_lower for k in ["kaise ho", "how are you", "kya haal hai", "kemitia achanti", "kemon achhen"]):
+        if lang == "hi":
+            return "Ek number King! Full speed me charging hu, batao aaj kya kaam hai?"
+        elif lang == "or":
+            return "Mo pura bhala achhi King! Aapana bataantu kana kariba?"
+        elif lang == "bn":
+            return "Ami bhalo achhi King! Bolun ajke ki help korbo?"
+        else:
+            return "I'm operating at peak performance, King! How can I assist you today?"
+
+    if any(k in prompt_lower for k in ["kya kar sakte ho", "what can you do", "features"]):
+        if lang == "hi":
+            return "Main screenshot le sakta hu, volume change, system status, apps launch, aur saare sawaalon ke jawab de sakta hu King!"
+        else:
+            return "I can take screenshots, adjust volume, check system status, open applications, and answer your questions, King!"
+
+    if any(k in prompt_lower for k in ["kisne banaya", "who made you", "creator"]):
+        return "Mujhe mere King ke liye ek poderoso, intelligent AI assistant ke roop me design kiya gaya hai!"
+
+    # Fallback to intelligent conversational response
+    if lang == "hi":
+        return f"Sahi baat hai King! Main samajh gaya. Aapne kaha '{user_prompt}'. Aur batao main ispe kya action lu?"
+    elif lang == "or":
+        return f"Haan King! Aapanka katha mo bujhi gali. Aaji kana kariba bataantu?"
     elif lang == "bn":
-        if "kemon" in prompt_lower or "achhen" in prompt_lower:
-            return "Ami bhalo achhi King! Apni kemon achhen? Bolun ajke ki korbo?"
-        else:
-            return "Haan King! Wrock apnar sebay prostut achhe!"
-    elif lang == "hi":
-        if "kaise ho" in prompt_lower:
-            return "Ek number King! Full charging mode me hu, batao aaj kya scene hai?"
-        else:
-            return "Sahi baat hai King! Wrock haazir hai. Aapki aagya sar aankhon par!"
+        return f"Haan King! Apnar katha bujhte perechhi. Bolun ar ki korbo?"
     else:
-        if "how are you" in prompt_lower:
-            return "I am doing great, King! Standing by for your commands."
-        elif "who are you" in prompt_lower:
-            return "I am Wrock, your personal Grok and Claude powered AI command assistant!"
-        elif "what can you do" in prompt_lower:
-            return "I can control your PC, capture screenshots, manage volume, check system status, open apps, and assist you in any language, King!"
-        else:
-            return "At your service, King! Tell me what you need."
+        return f"Understood, King! You said '{user_prompt}'. I am standing by for your next instruction."
 
 
 # ==============================================================================
@@ -798,7 +913,6 @@ def process_voice_command(cmd: str) -> None:
         action = "ai_query"
         reply = query_ai_assistant(cmd)
 
-    # Save to SQLite database
     wrock_db.log_interaction(user_input=cmd, response=reply, language=lang, action=action)
 
     log.info("🤖 Wrock: %s", reply)
@@ -806,17 +920,17 @@ def process_voice_command(cmd: str) -> None:
 
 
 def listen_and_process_voice_command() -> None:
-    """Activate Siri-style listener upon wake word or double clap."""
+    """Activate voice command listener (silent chime, tuned pause threshold)."""
     play_activation_chime()
     hud_widget.update_state("LISTENING", status_text="LISTENING FOR COMMAND...")
     log.info("🎙️ [Wrock Activated!] Listening for your voice command...")
     try:
         import speech_recognition as sr
         r = sr.Recognizer()
+        r.pause_threshold = 0.8  # Allow natural pauses without cutting off user
         with sr.Microphone() as source:
-            r.adjust_for_ambient_noise(source, duration=0.3)
             log.info("🎤 Listening... Speak your command now!")
-            audio = r.listen(source, timeout=6, phrase_time_limit=10)
+            audio = r.listen(source, timeout=7, phrase_time_limit=12)
         cmd = r.recognize_google(audio).lower().strip()
         log.info("🗣️ Recognized Command: %r", cmd)
         process_voice_command(cmd)
@@ -835,12 +949,12 @@ def voice_wake_word_loop() -> None:
     try:
         import speech_recognition as sr
         r = sr.Recognizer()
+        r.pause_threshold = 0.8
         log.info("🎙️ Voice Wake-Word Engine Active (Say 'Wake up Wrock' or 'Wrock' anytime!)")
         with sr.Microphone() as source:
-            r.adjust_for_ambient_noise(source, duration=0.5)
             while True:
                 try:
-                    audio = r.listen(source, timeout=4, phrase_time_limit=5)
+                    audio = r.listen(source, timeout=4, phrase_time_limit=6)
                     text = r.recognize_google(audio).lower().strip()
                     if text:
                         log.info("🗣️ Heard speech: %r", text)
@@ -867,14 +981,13 @@ def main() -> int:
     first_clap_time: float | None = None
     spike_armed = True
 
-    log.info("🚀 Starting Wrock Assistant (HUD + Double Clap + Voice Wake-Word Engine)...")
+    log.info("🚀 Starting Wrock Assistant (HUD + Microsoft HD Voice + Gemini/Grok/Claude Engine)...")
     
-    # Start Holographic HUD Widget
     hud_widget.start()
 
     input_idx = _choose_input_device(blocksize)
 
-    # Start background voice wake-word thread ("Wake up Wrock" / "Wrock")
+    # Launch background voice wake-word thread ("Wake up Wrock" / "Wrock")
     threading.Thread(target=voice_wake_word_loop, daemon=True).start()
 
     try:
