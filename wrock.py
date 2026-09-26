@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-WROCK: Ultra-Fast Voice AI & Full PC Automation Assistant (Gemini, Grok & Claude Powered)
-Featuring Holographic Floating HUD Overlay, Microsoft HD Neural Voice Synthesis (edge-tts),
-Multi-lingual Intelligence (Hindi, Hinglish, Odia, Bengali, English), Silent Double-Clap & Wake-Word
-Activation, SQLite Chat Logging, and Complete PC Automation.
+WROCK: Ultra-Fast Voice AI & Full PC Automation Assistant (Astra, OpenAI, Gemini, Grok & Claude Powered)
+Featuring Floating HUD Overlay Overlay, Microsoft HD Neural Voice & ElevenLabs TTS,
+Multi-lingual Intelligence (Hindi, Hinglish, Odia, Bengali, English), Silent Activation,
+SQLite Chat Logging, and Complete PC Automation.
 """
 
 from __future__ import annotations
@@ -56,6 +56,11 @@ try:
 except ImportError:
     edge_tts = None
 
+try:
+    import openai
+except ImportError:
+    openai = None
+
 
 # --- Tuning knobs & constants --------------------------------------------------
 SAMPLE_RATE = 44100
@@ -78,7 +83,7 @@ INPUT_SILENT_RMS = 0.0001
 BEEP_ENABLED = False
 
 # Voice Wake Words (Siri / Grok Mode)
-WAKE_WORDS = ["wake up wrock", "wake up, wrock", "wake up", "wrock", "hey wrock", "ok wrock"]
+WAKE_WORDS = ["wake up wrock", "wake up, wrock", "wake up rock", "wake up", "wrock", "hey wrock", "ok wrock"]
 
 WROCK_WELCOME_ENABLED = True
 WROCK_WELCOME_PHRASE = "Wrock online. Standing by for your command, King."
@@ -237,7 +242,7 @@ class WrockHUDWidget:
             elif self.state == "THINKING":
                 ring_color = "#ffaa00"
                 core_color = "#ffffff"
-                state_badge = "[ THINKING (AI)... ]"
+                state_badge = "[ THINKING (ASTRA/AI)... ]"
             elif self.state == "SPEAKING":
                 ring_color = "#ff3366"
                 core_color = "#ff6600"
@@ -281,7 +286,7 @@ class WrockHUDWidget:
             # Title & State
             self.canvas.create_text(
                 195, 22,
-                text="⚡ WROCK HUD ✦ AI ASSISTANT",
+                text="⚡ WROCK HUD ✦ ASTRA AI",
                 fill="#00e5ff",
                 font=("Consolas", 10, "bold"),
                 anchor="w",
@@ -338,7 +343,7 @@ hud_widget = WrockHUDWidget()
 
 
 # ==============================================================================
-# 2. AUDIO & HD VOICE SYNTHESIS (edge-tts + ElevenLabs + Pygame)
+# 2. AUDIO & HD VOICE SYNTHESIS (ElevenLabs + edge-tts + Pygame)
 # ==============================================================================
 
 def block_samples() -> int:
@@ -532,10 +537,12 @@ wrock_db = WrockDatabase()
 
 
 def detect_script_lang(text: str) -> str:
-    """Detect language based on Unicode script or transliterated keywords (Odia, Bengali, Hindi, English)."""
+    """Detect language strictly (en, hi, or, bn). Default to 'en' for English."""
     t = text.strip()
     if not t:
         return "en"
+
+    # Unicode Script range checks
     for char in t:
         cp = ord(char)
         if 0x0B00 <= cp <= 0x0B7F:
@@ -546,17 +553,23 @@ def detect_script_lang(text: str) -> str:
             return "hi"  # Devanagari script
 
     t_lower = t.lower()
+    # Transliterated Odia keywords
     if any(w in t_lower.split() for w in {"kemitia", "achanti", "namaskar", "kan", "khabar", "odisha", "bhala", "ghara", "kholideba"}):
         return "or"
+
+    # Transliterated Bengali keywords
     if any(w in t_lower.split() for w in {"kemon", "achhen", "khobor", "amra", "bangla", "bhalo", "ki", "dada", "khule"}):
         return "bn"
+
+    # Transliterated Hindi keywords
     if any(w in t_lower.split() for w in {"kaise", "hai", "bhai", "kya", "batao", "karo", "aaj", "suniye", "khol", "namaste", "shukriya", "bajaao", "karna", "haazir", "sab", "apna", "mujhe", "tumhari", "tum", "kahan", "kaun"}):
         return "hi"
 
+    # Restrict langdetect to valid target languages only (prevents random codes like 'cy')
     try:
         from langdetect import detect
         d = detect(t)
-        if d:
+        if d in ("hi", "or", "bn", "en"):
             return d
     except Exception:
         pass
@@ -564,26 +577,84 @@ def detect_script_lang(text: str) -> str:
     return "en"
 
 
+def _extract_openai_response(res) -> str | None:
+    """Helper to extract text from OpenAI Responses API object."""
+    if hasattr(res, "output_text") and res.output_text:
+        return res.output_text.strip()
+    if hasattr(res, "output") and res.output:
+        for item in res.output:
+            if hasattr(item, "content"):
+                for c in item.content:
+                    if hasattr(c, "text") and c.text:
+                        return c.text.strip()
+                    elif isinstance(c, str):
+                        return c.strip()
+            elif hasattr(item, "text") and item.text:
+                return item.text.strip()
+    if hasattr(res, "choices") and res.choices:
+        if hasattr(res.choices[0], "message") and res.choices[0].message.content:
+            return res.choices[0].message.content.strip()
+    if isinstance(res, str):
+        return res.strip()
+    return None
+
+
 # ==============================================================================
-# 4. SUPER-INTELLIGENT MULTI-TIER AI BRAIN (Gemini, Groq, Claude, ChatGPT)
+# 4. SUPER-INTELLIGENT MULTI-TIER AI BRAIN (Astra, OpenAI, Gemini, Grok, Claude)
 # ==============================================================================
 
 def query_ai_assistant(user_prompt: str) -> str:
     """
-    Multi-tier LLM query router: Gemini -> Groq -> Claude -> xAI -> OpenAI -> Smart NLP Brain.
+    Multi-tier LLM query router: OpenAI Astra (gpt-6-astra) -> Gemini -> Groq -> Claude -> xAI -> Smart NLP.
     Ensures 100% intelligent, context-aware responses in the user's spoken language.
     """
     lang = detect_script_lang(user_prompt)
     prompt_lower = user_prompt.lower().strip()
 
     sys_msg = (
-        "You are Wrock, a world-class AI voice assistant for your King. "
+        "You are Wrock, a world-class AI voice assistant for your King powered by Astra and LLM intelligence. "
         "You control the user's PC and speak with Grok's confident, intelligent, witty style. "
         "ALWAYS RESPOND IN THE EXACT SAME LANGUAGE AND SCRIPT THAT THE USER SPOKE IN (Hindi, Hinglish, Odia, Bengali, English). "
         "Keep responses intelligent, natural, concise (1-2 sentences), sharp, and respectful to your King."
     )
 
-    # 1. Try Google Gemini API if key exists
+    # 1. Try OpenAI Astra API (model: gpt-6-astra using OpenAI Responses API)
+    openai_key = (os.environ.get("OPENAI_API_KEY") or "").strip()
+    if openai_key:
+        try:
+            import openai
+            client = openai.OpenAI(api_key=openai_key)
+            log.info("🤖 Querying OpenAI Astra API (gpt-6-astra)...")
+            try:
+                res = client.responses.create(
+                    model="gpt-6-astra",
+                    input=user_prompt,
+                    instructions=sys_msg,
+                    max_output_tokens=150,
+                )
+                text = _extract_openai_response(res)
+                if text:
+                    log.info("✨ OpenAI Astra Response: %s", text)
+                    return text
+            except Exception as e_resp:
+                log.warning("OpenAI Responses API (gpt-6-astra) notice: %s. Trying chat completions fallback...", e_resp)
+                res = client.chat.completions.create(
+                    model="gpt-6-astra",
+                    messages=[
+                        {"role": "system", "content": sys_msg},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    max_tokens=150,
+                )
+                if res.choices and res.choices[0].message.content:
+                    text = res.choices[0].message.content.strip()
+                    if text:
+                        log.info("✨ OpenAI Astra Response: %s", text)
+                        return text
+        except Exception as e:
+            log.warning("OpenAI Astra API notice: %s", e)
+
+    # 2. Try Google Gemini API if key exists
     gemini_key = (os.environ.get("GEMINI_API_KEY") or "").strip()
     if gemini_key:
         try:
@@ -596,7 +667,7 @@ def query_ai_assistant(user_prompt: str) -> str:
         except Exception as e:
             log.warning("Gemini API notice: %s", e)
 
-    # 2. Try Groq API (LLaMA 3.3 70B - Ultra Fast)
+    # 3. Try Groq API (LLaMA 3.3 70B - Ultra Fast)
     groq_key = (os.environ.get("GROQ_API_KEY") or "").strip()
     if groq_key:
         try:
@@ -615,7 +686,7 @@ def query_ai_assistant(user_prompt: str) -> str:
         except Exception as e:
             log.warning("Groq API notice: %s", e)
 
-    # 3. Try Anthropic Claude API
+    # 4. Try Anthropic Claude API
     anthropic_key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
     workspace_id = (os.environ.get("ANTHROPIC_WORKSPACE_ID") or "").strip()
     if anthropic_key:
@@ -634,7 +705,7 @@ def query_ai_assistant(user_prompt: str) -> str:
         except Exception as e:
             log.warning("Anthropic Claude notice: %s", e)
 
-    # 4. Try xAI Grok API
+    # 5. Try xAI Grok API
     xai_key = (os.environ.get("XAI_API_KEY") or "").strip()
     if xai_key:
         try:
@@ -656,29 +727,17 @@ def query_ai_assistant(user_prompt: str) -> str:
         except Exception as e:
             log.warning("xAI Grok notice: %s", e)
 
-    # 5. Try OpenAI GPT-4o API
-    openai_key = (os.environ.get("OPENAI_API_KEY") or "").strip()
-    if openai_key:
-        try:
-            import requests
-            headers = {"Authorization": f"Bearer {openai_key}", "Content-Type": "application/json"}
-            payload = {
-                "model": "gpt-4o-mini",
-                "messages": [
-                    {"role": "system", "content": sys_msg},
-                    {"role": "user", "content": user_prompt}
-                ],
-                "max_tokens": 120
-            }
-            res = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=5)
-            if res.status_code == 200:
-                content = res.json()["choices"][0]["message"]["content"].strip()
-                if content:
-                    return content
-        except Exception as e:
-            log.warning("OpenAI notice: %s", e)
-
     # 6. Comprehensive Smart Conversational NLP Engine (Zero Canned Generic Strings!)
+    if any(k in prompt_lower for k in ["how are you", "how r u", "kaise ho", "kya haal hai", "kemitia achanti"]):
+        if lang == "hi":
+            return "Ek number King! Full speed me running hu, batao aaj kya kaam hai?"
+        elif lang == "or":
+            return "Mo pura bhala achhi King! Aapana bataantu kana kariba?"
+        elif lang == "bn":
+            return "Ami bhalo achhi King! Bolun ajke ki help korbo?"
+        else:
+            return "I'm doing great and operating at peak performance, King! How can I assist you today?"
+
     if any(k in prompt_lower for k in ["kahan se ho", "where are you from", "kahan se", "origin"]):
         if lang == "hi":
             return "Main aapke PC me rehne wala Wrock hu King! Virtual world se aaya hu aapke aadesh ke liye."
@@ -687,7 +746,7 @@ def query_ai_assistant(user_prompt: str) -> str:
         elif lang == "bn":
             return "Ami Wrock! Apnar PC-te amar basabasa, apnar sebay prostut achhi King!"
         else:
-            return "I live inside your PC, King! Powered by AI and ready for your commands."
+            return "I live inside your PC, King! Powered by Astra AI and ready for your commands."
 
     if any(k in prompt_lower for k in ["kaun ho", "who are you", "tum kaun", "what is your name", "naam kya hai"]):
         if lang == "hi":
@@ -697,36 +756,26 @@ def query_ai_assistant(user_prompt: str) -> str:
         elif lang == "bn":
             return "Ami Wrock, apnar personal AI command assistant, King!"
         else:
-            return "I am Wrock, your personal AI assistant and PC commander, King!"
-
-    if any(k in prompt_lower for k in ["kaise ho", "how are you", "kya haal hai", "kemitia achanti", "kemon achhen"]):
-        if lang == "hi":
-            return "Ek number King! Full speed me charging hu, batao aaj kya kaam hai?"
-        elif lang == "or":
-            return "Mo pura bhala achhi King! Aapana bataantu kana kariba?"
-        elif lang == "bn":
-            return "Ami bhalo achhi King! Bolun ajke ki help korbo?"
-        else:
-            return "I'm operating at peak performance, King! How can I assist you today?"
+            return "I am Wrock, your personal Astra AI assistant and PC commander, King!"
 
     if any(k in prompt_lower for k in ["kya kar sakte ho", "what can you do", "features"]):
         if lang == "hi":
             return "Main screenshot le sakta hu, volume change, system status, apps launch, aur saare sawaalon ke jawab de sakta hu King!"
         else:
-            return "I can take screenshots, adjust volume, check system status, open applications, and answer your questions, King!"
+            return "I can take screenshots, adjust volume, check system status, open applications, and answer any questions, King!"
 
     if any(k in prompt_lower for k in ["kisne banaya", "who made you", "creator"]):
         return "Mujhe mere King ke liye ek poderoso, intelligent AI assistant ke roop me design kiya gaya hai!"
 
-    # Fallback to intelligent conversational response
+    # Fallback conversational response
     if lang == "hi":
-        return f"Sahi baat hai King! Main samajh gaya. Aapne kaha '{user_prompt}'. Aur batao main ispe kya action lu?"
+        return f"Sahi baat hai King! Main samajh gaya. Aapne kaha '{user_prompt}'. Main aapke aadesh ke liye tayyar hu."
     elif lang == "or":
         return f"Haan King! Aapanka katha mo bujhi gali. Aaji kana kariba bataantu?"
     elif lang == "bn":
         return f"Haan King! Apnar katha bujhte perechhi. Bolun ar ki korbo?"
     else:
-        return f"Understood, King! You said '{user_prompt}'. I am standing by for your next instruction."
+        return f"Understood, King! You asked '{user_prompt}'. I am standing by for your next instruction."
 
 
 # ==============================================================================
@@ -830,6 +879,9 @@ def open_cursor_window() -> None:
 def process_voice_command(cmd: str) -> None:
     """Process incoming voice command and execute PC actions or AI queries."""
     cmd = cmd.lower().strip()
+    if not cmd:
+        return
+
     lang = detect_script_lang(cmd)
     log.info("⚡ Executing Wrock Command: %r (Language: %s)", cmd, lang)
     hud_widget.update_state("THINKING", user_text=cmd)
@@ -837,86 +889,93 @@ def process_voice_command(cmd: str) -> None:
     action = "chat"
     reply = ""
 
-    # PC Automation Commands
-    if "screenshot" in cmd or "capture screen" in cmd or "take picture" in cmd:
-        action = "screenshot"
-        res = take_screenshot()
-        reply = "Screenshot captured and saved for you, King!"
-    elif "volume up" in cmd or "increase volume" in cmd or "louder" in cmd:
-        action = "volume_up"
-        reply = change_volume("up")
-    elif "volume down" in cmd or "decrease volume" in cmd or "quieter" in cmd:
-        action = "volume_down"
-        reply = change_volume("down")
-    elif "mute" in cmd or "silence" in cmd:
-        action = "volume_mute"
-        reply = change_volume("mute")
-    elif "status" in cmd or "cpu" in cmd or "ram" in cmd or "battery" in cmd or "laptop status" in cmd:
-        action = "system_status"
-        reply = get_system_status()
-    elif "lock pc" in cmd or "lock computer" in cmd or "lock screen" in cmd or "sleep pc" in cmd:
-        action = "lock_pc"
-        reply = lock_pc()
-    elif cmd.startswith("type ") or cmd.startswith("write "):
-        action = "type_text"
-        txt = cmd.replace("type", "", 1).replace("write", "", 1).strip()
-        reply = type_text(txt)
-    elif "close window" in cmd or "close app" in cmd:
-        action = "close_window"
-        reply = close_active_window()
-    elif "file explorer" in cmd or "my computer" in cmd or "open files" in cmd:
-        action = "open_explorer"
-        subprocess.Popen(["explorer.exe"])
-        reply = "Opening File Explorer for you, King!"
-    elif "task manager" in cmd:
-        action = "open_taskmgr"
-        subprocess.Popen(["taskmgr.exe"])
-        reply = "Opening Task Manager, King!"
-    elif "youtube" in cmd:
-        action = "open_youtube"
-        open_url_in_chrome("https://www.youtube.com")
-        reply = "Opening YouTube for you, King!"
-    elif "claude" in cmd:
-        action = "open_claude"
-        open_url_in_chrome("https://claude.ai/new")
-        reply = "Opening Claude AI for you, King!"
-    elif "cursor" in cmd or "code" in cmd or "ide" in cmd:
-        action = "open_cursor"
-        open_cursor_window()
-        reply = "Opening Cursor IDE for you, King!"
-    elif "spotify" in cmd or "music" in cmd or "song" in cmd:
-        action = "play_music"
-        webbrowser.open("https://open.spotify.com")
-        reply = "Opening Spotify music, King!"
-    elif "calculator" in cmd or "calc" in cmd:
-        action = "open_calculator"
-        subprocess.Popen(["calc.exe"])
-        reply = "Opening Calculator for you, King."
-    elif "notepad" in cmd:
-        action = "open_notepad"
-        subprocess.Popen(["notepad.exe"])
-        reply = "Opening Notepad for you, King."
-    elif "time" in cmd or "samay" in cmd:
-        action = "tell_time"
-        now_str = time.strftime("%I:%M %p")
-        reply = f"Current time is {now_str}, King."
-    elif "date" in cmd or "taarikh" in cmd:
-        action = "tell_date"
-        date_str = time.strftime("%A, %B %d, %Y")
-        reply = f"Today is {date_str}, King."
-    elif "search" in cmd or "google" in cmd:
-        action = "web_search"
-        q = cmd.replace("search", "").replace("google", "").replace("for", "").strip()
-        open_url_in_chrome(f"https://www.google.com/search?q={q}" if q else "https://www.google.com")
-        reply = f"Searching Google for {q or 'your topic'}, King!"
-    else:
-        action = "ai_query"
-        reply = query_ai_assistant(cmd)
+    try:
+        # PC Automation Commands
+        if "screenshot" in cmd or "capture screen" in cmd or "take picture" in cmd:
+            action = "screenshot"
+            res = take_screenshot()
+            reply = "Screenshot captured and saved for you, King!"
+        elif "volume up" in cmd or "increase volume" in cmd or "louder" in cmd:
+            action = "volume_up"
+            reply = change_volume("up")
+        elif "volume down" in cmd or "decrease volume" in cmd or "quieter" in cmd:
+            action = "volume_down"
+            reply = change_volume("down")
+        elif "mute" in cmd or "silence" in cmd:
+            action = "volume_mute"
+            reply = change_volume("mute")
+        elif "status" in cmd or "cpu" in cmd or "ram" in cmd or "battery" in cmd or "laptop status" in cmd:
+            action = "system_status"
+            reply = get_system_status()
+        elif "lock pc" in cmd or "lock computer" in cmd or "lock screen" in cmd or "sleep pc" in cmd:
+            action = "lock_pc"
+            reply = lock_pc()
+        elif cmd.startswith("type ") or cmd.startswith("write "):
+            action = "type_text"
+            txt = cmd.replace("type", "", 1).replace("write", "", 1).strip()
+            reply = type_text(txt)
+        elif "close window" in cmd or "close app" in cmd:
+            action = "close_window"
+            reply = close_active_window()
+        elif "file explorer" in cmd or "my computer" in cmd or "open files" in cmd:
+            action = "open_explorer"
+            subprocess.Popen(["explorer.exe"])
+            reply = "Opening File Explorer for you, King!"
+        elif "task manager" in cmd:
+            action = "open_taskmgr"
+            subprocess.Popen(["taskmgr.exe"])
+            reply = "Opening Task Manager, King!"
+        elif "youtube" in cmd:
+            action = "open_youtube"
+            open_url_in_chrome("https://www.youtube.com")
+            reply = "Opening YouTube for you, King!"
+        elif "claude" in cmd:
+            action = "open_claude"
+            open_url_in_chrome("https://claude.ai/new")
+            reply = "Opening Claude AI for you, King!"
+        elif "cursor" in cmd or "code" in cmd or "ide" in cmd:
+            action = "open_cursor"
+            open_cursor_window()
+            reply = "Opening Cursor IDE for you, King!"
+        elif "spotify" in cmd or "music" in cmd or "song" in cmd:
+            action = "play_music"
+            webbrowser.open("https://open.spotify.com")
+            reply = "Opening Spotify music, King!"
+        elif "calculator" in cmd or "calc" in cmd:
+            action = "open_calculator"
+            subprocess.Popen(["calc.exe"])
+            reply = "Opening Calculator for you, King."
+        elif "notepad" in cmd:
+            action = "open_notepad"
+            subprocess.Popen(["notepad.exe"])
+            reply = "Opening Notepad for you, King."
+        elif "time" in cmd or "samay" in cmd:
+            action = "tell_time"
+            now_str = time.strftime("%I:%M %p")
+            reply = f"Current time is {now_str}, King."
+        elif "date" in cmd or "taarikh" in cmd:
+            action = "tell_date"
+            date_str = time.strftime("%A, %B %d, %Y")
+            reply = f"Today is {date_str}, King."
+        elif "search" in cmd or "google" in cmd:
+            action = "web_search"
+            q = cmd.replace("search", "").replace("google", "").replace("for", "").strip()
+            open_url_in_chrome(f"https://www.google.com/search?q={q}" if q else "https://www.google.com")
+            reply = f"Searching Google for {q or 'your topic'}, King!"
+        else:
+            action = "ai_query"
+            reply = query_ai_assistant(cmd)
 
-    wrock_db.log_interaction(user_input=cmd, response=reply, language=lang, action=action)
+        log.info("🤖 Wrock Response Generated: %r", reply)
+        wrock_db.log_interaction(user_input=cmd, response=reply, language=lang, action=action)
 
-    log.info("🤖 Wrock: %s", reply)
-    speak_text(reply)
+        # Send Astra/LLM returned text to ElevenLabs / HD Voice TTS
+        speak_text(reply)
+
+    except Exception as e:
+        log.error("Error executing voice command %r: %s", cmd, e, exc_info=True)
+        hud_widget.update_state("IDLE", status_text="STANDBY FOR COMMAND")
+        speak_text("I encountered an error processing your command, King.")
 
 
 def listen_and_process_voice_command() -> None:
@@ -927,7 +986,7 @@ def listen_and_process_voice_command() -> None:
     try:
         import speech_recognition as sr
         r = sr.Recognizer()
-        r.pause_threshold = 0.8  # Allow natural pauses without cutting off user
+        r.pause_threshold = 0.8
         with sr.Microphone() as source:
             log.info("🎤 Listening... Speak your command now!")
             audio = r.listen(source, timeout=7, phrase_time_limit=12)
@@ -981,7 +1040,7 @@ def main() -> int:
     first_clap_time: float | None = None
     spike_armed = True
 
-    log.info("🚀 Starting Wrock Assistant (HUD + Microsoft HD Voice + Gemini/Grok/Claude Engine)...")
+    log.info("🚀 Starting Wrock Assistant (Astra/OpenAI/Gemini/Grok/Claude Engine + Floating HUD + ElevenLabs/HD Voice)...")
     
     hud_widget.start()
 
