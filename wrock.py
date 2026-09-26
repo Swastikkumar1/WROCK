@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """
-WROCK: Ultra-Fast Voice AI & Full PC Automation Assistant (Astra, OpenAI, Gemini, Grok & Claude Powered)
-Featuring Floating HUD Overlay Overlay, Microsoft HD Neural Voice & ElevenLabs TTS,
-Multi-lingual Intelligence (Hindi, Hinglish, Odia, Bengali, English), Silent Activation,
-SQLite Chat Logging, and Complete PC Automation.
+WROCK: Ultra-Fast Voice AI & Full PC Automation Assistant
+Configured Architecture:
+- ElevenLabs API: Primary Voice Synthesis Engine ("take the voice")
+- Anthropic Claude API: Primary AI Intelligence Brain ("behave, response & nature of answer")
+- xAI Grok API: Persona, Witty Style & Mannerisms ("say things in Grok tone")
+- OpenAI Astra / Gemini / Groq: Multi-tier fallback engines
+- SQLite Chat Logging & Full Windows PC Automation.
 """
 
 from __future__ import annotations
@@ -242,11 +245,11 @@ class WrockHUDWidget:
             elif self.state == "THINKING":
                 ring_color = "#ffaa00"
                 core_color = "#ffffff"
-                state_badge = "[ THINKING (ASTRA/AI)... ]"
+                state_badge = "[ CLAUDE THINKING... ]"
             elif self.state == "SPEAKING":
                 ring_color = "#ff3366"
                 core_color = "#ff6600"
-                state_badge = "[ SPEAKING... ]"
+                state_badge = "[ ELEVENLABS SPEAKING... ]"
             else:  # IDLE
                 ring_color = "#ff6600"
                 core_color = "#ffaa00"
@@ -286,7 +289,7 @@ class WrockHUDWidget:
             # Title & State
             self.canvas.create_text(
                 195, 22,
-                text="⚡ WROCK HUD ✦ ASTRA AI",
+                text="⚡ WROCK HUD ✦ CLAUDE + GROK",
                 fill="#00e5ff",
                 font=("Consolas", 10, "bold"),
                 anchor="w",
@@ -343,7 +346,7 @@ hud_widget = WrockHUDWidget()
 
 
 # ==============================================================================
-# 2. AUDIO & HD VOICE SYNTHESIS (ElevenLabs + edge-tts + Pygame)
+# 2. AUDIO & ELEVENLABS VOICE SYNTHESIS
 # ==============================================================================
 
 def block_samples() -> int:
@@ -427,7 +430,7 @@ async def _speak_edge_tts_async(text: str, voice_name: str) -> bool:
 
 
 def speak_text(text: str) -> None:
-    """Speak text via ElevenLabs, Microsoft HD Neural Voice (edge-tts), or pyttsx3."""
+    """Speak text via ElevenLabs (Primary Voice API), Microsoft HD Neural Voice (edge-tts), or pyttsx3."""
     if not text.strip():
         return
     text = text.strip()
@@ -437,12 +440,12 @@ def speak_text(text: str) -> None:
         .replace("W R O C K", "Wrock")
         .replace("W-R-O-C-K", "Wrock")
     )
-    log.info("🗣️ Wrock Speaking: %s", spoken_text)
+    log.info("🗣️ Wrock Speaking via ElevenLabs Voice: %s", spoken_text)
     hud_widget.update_state("SPEAKING", assistant_text=spoken_text)
 
-    # 1. ElevenLabs API if valid key present
+    # 1. ElevenLabs API (Primary Voice API per user request)
     api_key = (os.environ.get("ELEVENLABS_API_KEY") or "").strip()
-    vid = (os.environ.get("ELEVENLABS_VOICE_ID") or "").strip()
+    vid = (os.environ.get("ELEVENLABS_VOICE_ID") or "VR6AewLTigWG4xSOukaG").strip()
     if api_key and vid:
         try:
             from elevenlabs.client import ElevenLabs
@@ -462,14 +465,11 @@ def speak_text(text: str) -> None:
                 hud_widget.update_state("IDLE")
                 return
         except Exception as e:
-            log.warning("ElevenLabs notice: %s. Switching to Microsoft HD Neural Voice...", e)
+            log.warning("ElevenLabs API notice: %s. Switching to Microsoft HD Neural Voice fallback...", e)
 
-    # 2. Microsoft Edge HD Neural Voice (100% Free, Human Quality, Natural Articulation!)
+    # 2. Microsoft Edge HD Neural Voice fallback
     lang = detect_script_lang(spoken_text)
-    if lang in ("hi", "or", "bn"):
-        neural_voice = "hi-IN-SwaraNeural"  # Microsoft Indian HD Swara Voice
-    else:
-        neural_voice = "en-US-AvaNeural"    # Microsoft US HD Ava Voice
+    neural_voice = "hi-IN-SwaraNeural" if lang in ("hi", "or", "bn") else "en-US-AvaNeural"
 
     try:
         success = asyncio.run(_speak_edge_tts_async(spoken_text, neural_voice))
@@ -600,25 +600,75 @@ def _extract_openai_response(res) -> str | None:
 
 
 # ==============================================================================
-# 4. SUPER-INTELLIGENT MULTI-TIER AI BRAIN (Astra, OpenAI, Gemini, Grok, Claude)
+# 4. AI BRAIN: CLAUDE (Intelligence & Nature of Answer) + GROK (Personality & Tone)
 # ==============================================================================
 
 def query_ai_assistant(user_prompt: str) -> str:
     """
-    Multi-tier LLM query router: OpenAI Astra (gpt-6-astra) -> Gemini -> Groq -> Claude -> xAI -> Smart NLP.
-    Ensures 100% intelligent, context-aware responses in the user's spoken language.
+    Core AI Routing Engine:
+    - Primary Brain: Anthropic Claude API (Decides behavior, response content, and nature of answer)
+    - Personality & Mannerisms: Grok (Witty, confident, bold tone)
+    - Multi-tier Fallback: xAI Grok -> OpenAI Astra -> Gemini -> Groq -> Smart Conversational Engine
     """
     lang = detect_script_lang(user_prompt)
     prompt_lower = user_prompt.lower().strip()
 
     sys_msg = (
-        "You are Wrock, a world-class AI voice assistant for your King powered by Astra and LLM intelligence. "
-        "You control the user's PC and speak with Grok's confident, intelligent, witty style. "
+        "You are Wrock, a world-class AI assistant powered by Claude's deep intelligence for your King. "
+        "Use Claude's reasoning to formulate the nature, behavior, and content of all answers, "
+        "but deliver them with Grok's confident, witty, bold, intelligent tone and style. "
         "ALWAYS RESPOND IN THE EXACT SAME LANGUAGE AND SCRIPT THAT THE USER SPOKE IN (Hindi, Hinglish, Odia, Bengali, English). "
         "Keep responses intelligent, natural, concise (1-2 sentences), sharp, and respectful to your King."
     )
 
-    # 1. Try OpenAI Astra API (model: gpt-6-astra using OpenAI Responses API)
+    # 1. Primary AI Brain: Anthropic Claude API (Behavior & Nature of Response)
+    anthropic_key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+    workspace_id = (os.environ.get("ANTHROPIC_WORKSPACE_ID") or "").strip()
+    if anthropic_key:
+        try:
+            import anthropic
+            headers = {"anthropic-workspace-id": workspace_id} if workspace_id else None
+            client = anthropic.Anthropic(api_key=anthropic_key, default_headers=headers)
+            log.info("🧠 Querying Primary AI Brain (Anthropic Claude API)...")
+            res = client.messages.create(
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=150,
+                system=sys_msg,
+                messages=[{"role": "user", "content": user_prompt}]
+            )
+            if res.content and len(res.content) > 0:
+                text = res.content[0].text.strip()
+                if text:
+                    log.info("✨ Claude Response Generated: %s", text)
+                    return text
+        except Exception as e:
+            log.warning("Anthropic Claude API notice: %s", e)
+
+    # 2. Secondary AI Brain: xAI Grok API (Grok Persona & Style)
+    xai_key = (os.environ.get("XAI_API_KEY") or "").strip()
+    if xai_key:
+        try:
+            import requests
+            headers = {"Authorization": f"Bearer {xai_key}", "Content-Type": "application/json"}
+            payload = {
+                "model": "grok-beta",
+                "messages": [
+                    {"role": "system", "content": sys_msg},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "max_tokens": 150
+            }
+            log.info("🤖 Querying Grok API (xAI)...")
+            res = requests.post("https://api.x.ai/v1/chat/completions", headers=headers, json=payload, timeout=5)
+            if res.status_code == 200:
+                content = res.json()["choices"][0]["message"]["content"].strip()
+                if content:
+                    log.info("✨ Grok Response Generated: %s", content)
+                    return content
+        except Exception as e:
+            log.warning("xAI Grok API notice: %s", e)
+
+    # 3. OpenAI Astra API (gpt-6-astra model using Responses API)
     openai_key = (os.environ.get("OPENAI_API_KEY") or "").strip()
     if openai_key:
         try:
@@ -637,7 +687,7 @@ def query_ai_assistant(user_prompt: str) -> str:
                     log.info("✨ OpenAI Astra Response: %s", text)
                     return text
             except Exception as e_resp:
-                log.warning("OpenAI Responses API (gpt-6-astra) notice: %s. Trying chat completions fallback...", e_resp)
+                log.warning("OpenAI Responses API notice: %s. Trying chat completions fallback...", e_resp)
                 res = client.chat.completions.create(
                     model="gpt-6-astra",
                     messages=[
@@ -654,7 +704,7 @@ def query_ai_assistant(user_prompt: str) -> str:
         except Exception as e:
             log.warning("OpenAI Astra API notice: %s", e)
 
-    # 2. Try Google Gemini API if key exists
+    # 4. Try Google Gemini API if key exists
     gemini_key = (os.environ.get("GEMINI_API_KEY") or "").strip()
     if gemini_key:
         try:
@@ -667,7 +717,7 @@ def query_ai_assistant(user_prompt: str) -> str:
         except Exception as e:
             log.warning("Gemini API notice: %s", e)
 
-    # 3. Try Groq API (LLaMA 3.3 70B - Ultra Fast)
+    # 5. Try Groq API (LLaMA 3.3 70B - Ultra Fast)
     groq_key = (os.environ.get("GROQ_API_KEY") or "").strip()
     if groq_key:
         try:
@@ -685,47 +735,6 @@ def query_ai_assistant(user_prompt: str) -> str:
                 return completion.choices[0].message.content.strip()
         except Exception as e:
             log.warning("Groq API notice: %s", e)
-
-    # 4. Try Anthropic Claude API
-    anthropic_key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
-    workspace_id = (os.environ.get("ANTHROPIC_WORKSPACE_ID") or "").strip()
-    if anthropic_key:
-        try:
-            import anthropic
-            headers = {"anthropic-workspace-id": workspace_id} if workspace_id else None
-            client = anthropic.Anthropic(api_key=anthropic_key, default_headers=headers)
-            res = client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=120,
-                system=sys_msg,
-                messages=[{"role": "user", "content": user_prompt}]
-            )
-            if res.content:
-                return res.content[0].text.strip()
-        except Exception as e:
-            log.warning("Anthropic Claude notice: %s", e)
-
-    # 5. Try xAI Grok API
-    xai_key = (os.environ.get("XAI_API_KEY") or "").strip()
-    if xai_key:
-        try:
-            import requests
-            headers = {"Authorization": f"Bearer {xai_key}", "Content-Type": "application/json"}
-            payload = {
-                "model": "grok-beta",
-                "messages": [
-                    {"role": "system", "content": sys_msg},
-                    {"role": "user", "content": user_prompt}
-                ],
-                "max_tokens": 120
-            }
-            res = requests.post("https://api.x.ai/v1/chat/completions", headers=headers, json=payload, timeout=5)
-            if res.status_code == 200:
-                content = res.json()["choices"][0]["message"]["content"].strip()
-                if content:
-                    return content
-        except Exception as e:
-            log.warning("xAI Grok notice: %s", e)
 
     # 6. Comprehensive Smart Conversational NLP Engine (Zero Canned Generic Strings!)
     if any(k in prompt_lower for k in ["how are you", "how r u", "kaise ho", "kya haal hai", "kemitia achanti"]):
@@ -746,7 +755,7 @@ def query_ai_assistant(user_prompt: str) -> str:
         elif lang == "bn":
             return "Ami Wrock! Apnar PC-te amar basabasa, apnar sebay prostut achhi King!"
         else:
-            return "I live inside your PC, King! Powered by Astra AI and ready for your commands."
+            return "I live inside your PC, King! Powered by Claude and Grok AI, ready for your commands."
 
     if any(k in prompt_lower for k in ["kaun ho", "who are you", "tum kaun", "what is your name", "naam kya hai"]):
         if lang == "hi":
@@ -756,7 +765,7 @@ def query_ai_assistant(user_prompt: str) -> str:
         elif lang == "bn":
             return "Ami Wrock, apnar personal AI command assistant, King!"
         else:
-            return "I am Wrock, your personal Astra AI assistant and PC commander, King!"
+            return "I am Wrock, your personal AI assistant powered by Claude and Grok, King!"
 
     if any(k in prompt_lower for k in ["kya kar sakte ho", "what can you do", "features"]):
         if lang == "hi":
@@ -969,7 +978,7 @@ def process_voice_command(cmd: str) -> None:
         log.info("🤖 Wrock Response Generated: %r", reply)
         wrock_db.log_interaction(user_input=cmd, response=reply, language=lang, action=action)
 
-        # Send Astra/LLM returned text to ElevenLabs / HD Voice TTS
+        # Send Claude/Grok generated text to ElevenLabs API for Voice
         speak_text(reply)
 
     except Exception as e:
@@ -1040,7 +1049,7 @@ def main() -> int:
     first_clap_time: float | None = None
     spike_armed = True
 
-    log.info("🚀 Starting Wrock Assistant (Astra/OpenAI/Gemini/Grok/Claude Engine + Floating HUD + ElevenLabs/HD Voice)...")
+    log.info("🚀 Starting Wrock Assistant (Claude Brain + Grok Style + ElevenLabs Voice)...")
     
     hud_widget.start()
 
